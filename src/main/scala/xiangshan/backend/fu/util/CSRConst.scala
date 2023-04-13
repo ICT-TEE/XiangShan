@@ -125,6 +125,9 @@ trait HasCSRConst {
   // Machine level PMA
   val PmacfgBase    = 0x7C0
   val PmaaddrBase   = 0x7C8 // 64 entry at most
+  // SPMP
+  val SpmpcfgBase   = 0x1A0
+  val SpmpaddrBase  = 0x1B0
 
   // Machine Counter/Timers
   // Currently, we uses perfcnt csr set instead of standard Machine Counter/Timers

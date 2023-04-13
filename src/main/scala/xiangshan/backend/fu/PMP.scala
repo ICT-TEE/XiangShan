@@ -58,6 +58,7 @@ class PMPConfig(implicit p: Parameters) extends PMPBundle {
   def locked = l
   def addr_locked: Bool = locked
   def addr_locked(next: PMPConfig): Bool = locked || (next.locked && next.tor)
+  def s = l // for sPMP
 }
 
 object PMPConfigUInt {
@@ -300,7 +301,8 @@ trait PMPMethod extends PMPConst {
     num: Int = 16,
     cfgBase: Int,
     addrBase: Int,
-    entries: Vec[PMPEntry]
+    entries: Vec[PMPEntry],
+    sPMP: Boolean = false
   ) = {
     val pmpCfgPerCSR = PMXLEN / new PMPConfig().getWidth
     def pmpCfgIndex(i: Int) = (PMXLEN / 32) * (i / pmpCfgPerCSR)
@@ -320,7 +322,10 @@ trait PMPMethod extends PMPConst {
         addr = cfgBase + pmpCfgIndex(i),
         reg = cfgMerged(i/pmpCfgPerCSR),
         wmask = WritableMask,
-        wfn = new PMPBase().write_cfg_vec(mask, addr, i)
+        wfn = {
+          if (sPMP) new SPMPBase().write_cfg_vec(mask, addr, i)
+          else new PMPBase().write_cfg_vec(mask, addr, i)
+        }
       ))
     }).fold(Map())((a, b) => a ++ b) // ugly code, hit me if u have better codes
 
@@ -345,22 +350,26 @@ class PMP(implicit p: Parameters) extends PMPXSModule with HasXSParameter with P
     val distribute_csr = Flipped(new DistributedCSRIO())
     val pmp = Output(Vec(NumPMP, new PMPEntry()))
     val pma = Output(Vec(NumPMA, new PMPEntry()))
+    val spmp = Output(Vec(NumSPMP, new PMPEntry()))
   })
 
   val w = io.distribute_csr.w
 
   val pmp = Wire(Vec(NumPMP, new PMPEntry()))
   val pma = Wire(Vec(NumPMA, new PMPEntry()))
+  val spmp = Wire(Vec(NumSPMP, new PMPEntry()))
 
   val pmpMapping = pmp_gen_mapping(pmp_init, NumPMP, PmpcfgBase, PmpaddrBase, pmp)
   val pmaMapping = pmp_gen_mapping(pma_init, NumPMA, PmacfgBase, PmaaddrBase, pma)
-  val mapping = pmpMapping ++ pmaMapping
+  val spmpMapping = pmp_gen_mapping(pmp_init, NumSPMP, SpmpcfgBase, SpmpaddrBase, spmp, true)
+  val mapping = pmpMapping ++ pmaMapping ++ spmpMapping
 
   val rdata = Wire(UInt(PMXLEN.W))
   MaskedRegMap.generate(mapping, w.bits.addr, rdata, w.valid, w.bits.data)
 
   io.pmp := pmp
   io.pma := pma
+  io.spmp := spmp
 }
 
 class PMPReqBundle(lgMaxSize: Int = 3)(implicit p: Parameters) extends PMPBundle {
@@ -452,15 +461,34 @@ trait PMPCheckMethod extends PMPConst {
   }
 }
 
+// class PMPCheckerEnv(implicit p: Parameters) extends PMPBundle {
+//   val mode = UInt(2.W)
+//   val pmp = Vec(NumPMP, new PMPEntry())
+//   val pma = Vec(NumPMA, new PMPEntry())
+
+//   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry]): Unit = {
+//     this.mode := mode
+//     this.pmp := pmp
+//     this.pma := pma
+//   }
+// }
+
 class PMPCheckerEnv(implicit p: Parameters) extends PMPBundle {
   val mode = UInt(2.W)
   val pmp = Vec(NumPMP, new PMPEntry())
   val pma = Vec(NumPMA, new PMPEntry())
+  val spmp = Vec(NumSPMP, new PMPEntry())
+  val tlbCsr = new TlbCsrBundle
 
-  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry]): Unit = {
-    this.mode := mode
-    this.pmp := pmp
-    this.pma := pma
+  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry],
+    spmp: Vec[PMPEntry] = Vec(NumSPMP, 0.U.asTypeOf(new PMPEntry)),
+    tlbCsr: TlbCsrBundle = 0.U.asTypeOf(new TlbCsrBundle)
+  ): Unit = {
+    this.mode   := mode
+    this.pmp    := pmp
+    this.pma    := pma
+    this.spmp   := spmp
+    this.tlbCsr := tlbCsr
   }
 }
 
@@ -483,6 +511,15 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], valid: Bool, addr: UInt) = {
     check_env.apply(mode, pmp, pma)
     req_apply(valid, addr)
+    resp
+  }
+
+  // for sPMP
+  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle],
+    spmp: Vec[PMPEntry], tlbCsr: TlbCsrBundle
+  ) = {
+    check_env.apply(mode, pmp, pma, spmp, tlbCsr)
+    this.req := req
     resp
   }
 }
@@ -508,6 +545,15 @@ class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
     req_apply(valid, addr)
     resp
   }
+
+  // for sPMP
+  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle],
+    spmp: Vec[PMPEntry], tlbCsr: TlbCsrBundle
+  ) = {
+    check_env.apply(mode, pmp, pma, spmp, tlbCsr)
+    this.req := req
+    resp
+  }
 }
 
 @chiselName
@@ -516,10 +562,12 @@ class PMPChecker
   lgMaxSize: Int = 3,
   sameCycle: Boolean = false,
   leaveHitMux: Boolean = false,
-  pmpUsed: Boolean = true
+  pmpUsed: Boolean = true,
+  spmpUsed: Boolean = true
 )(implicit p: Parameters) extends PMPModule
   with PMPCheckMethod
   with PMACheckMethod
+  with SPMPCheckMethod
 {
   require(!(leaveHitMux && sameCycle))
   val io = IO(new PMPCheckIO(lgMaxSize))
@@ -528,10 +576,16 @@ class PMPChecker
 
   val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
   val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
+  val res_spmp = spmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.spmp, io.check_env.mode, lgMaxSize, io.check_env.tlbCsr)
 
   val resp_pmp = pmp_check(req.cmd, res_pmp.cfg)
   val resp_pma = pma_check(req.cmd, res_pma.cfg)
-  val resp = if (pmpUsed) (resp_pmp | resp_pma) else resp_pma
+  val resp_spmp = spmp_check(req.cmd, res_spmp.cfg)
+
+  val presp = if (pmpUsed) (resp_pmp | resp_pma) else resp_pma
+  val sresp = if (spmpUsed) (presp | resp_spmp) else presp
+  // val resp = Mux(io.check_env.tlbCsr.satp.mode === 0.U, presp, sresp)  无论satp值多少sPMP总是开启
+  val resp = sresp
 
   if (sameCycle || leaveHitMux) {
     io.resp := resp
@@ -546,10 +600,12 @@ class PMPCheckerv2
 (
   lgMaxSize: Int = 3,
   sameCycle: Boolean = false,
-  leaveHitMux: Boolean = false
+  leaveHitMux: Boolean = false,
+  spmpUsed: Boolean = true
 )(implicit p: Parameters) extends PMPModule
   with PMPCheckMethod
   with PMACheckMethod
+  with SPMPCheckMethod
 {
   require(!(leaveHitMux && sameCycle))
   val io = IO(new PMPCheckv2IO(lgMaxSize))
@@ -558,8 +614,9 @@ class PMPCheckerv2
 
   val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
   val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
+  val res_spmp = spmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.spmp, io.check_env.mode, lgMaxSize, io.check_env.tlbCsr)
 
-  val resp = and(res_pmp, res_pma)
+  val resp = and(res_pmp, res_pma, if (spmpUsed) res_spmp else res_pmp)
 
   if (sameCycle || leaveHitMux) {
     io.resp := resp
@@ -574,6 +631,19 @@ class PMPCheckerv2
     tmp_res.r := pmp.cfg.r && pma.cfg.r
     tmp_res.w := pmp.cfg.w && pma.cfg.w
     tmp_res.x := pmp.cfg.x && pma.cfg.x
+    tmp_res.c := pma.cfg.c
+    tmp_res.atomic := pma.cfg.atomic
+    tmp_res
+  }
+
+  // for spmp
+  def and(pmp: PMPEntry, pma: PMPEntry, spmp: PMPEntry): PMPConfig = {
+    val tmp_res = Wire(new PMPConfig)
+    tmp_res.l := DontCare
+    tmp_res.a := DontCare
+    tmp_res.r := pma.cfg.r && pmp.cfg.r && spmp.cfg.r
+    tmp_res.w := pma.cfg.w && pmp.cfg.w && spmp.cfg.w
+    tmp_res.x := pma.cfg.x && pmp.cfg.x && spmp.cfg.x
     tmp_res.c := pma.cfg.c
     tmp_res.atomic := pma.cfg.atomic
     tmp_res

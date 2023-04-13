@@ -188,6 +188,32 @@ class MinimalConfig(n: Int = 1) extends Config(
   })
 )
 
+class MyConfig(n: Int = 1) extends Config(
+  new MinimalConfig(n).alter((site, here, up) => {
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      //EnableDebug = true    // Debug message
+    )
+    case XSTileKey => up(XSTileKey).map(_.copy(
+      //EnableBPD = true,
+      //EnableLoop = true,
+      // icacheParameters = ICacheParameters(
+      //   nSets = 64, // 16KB ICache
+      //   tagECC = Some("parity"),
+      //   dataECC = Some("parity"),
+      //   replacer = Some("setplru"),
+      //   nMissEntries = 2,
+      //   nReleaseEntries = 1,
+      //   nProbeEntries = 2,
+      //   nPrefetchEntries = 2,
+      //   hasPrefetch = true
+      // ),
+    ))
+    // case SoCParamsKey => up(SoCParamsKey).copy(
+    //   L3CacheParamsOpt = None
+    // )
+  })
+)
+
 // Non-synthesizable MinimalConfig, for fast simulation only
 class MinimalSimConfig(n: Int = 1) extends Config(
   new MinimalConfig(n).alter((site, here, up) => {
