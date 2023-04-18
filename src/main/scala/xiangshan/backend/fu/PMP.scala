@@ -478,17 +478,25 @@ class PMPCheckerEnv(implicit p: Parameters) extends PMPBundle {
   val pmp = Vec(NumPMP, new PMPEntry())
   val pma = Vec(NumPMA, new PMPEntry())
   val spmp = Vec(NumSPMP, new PMPEntry())
-  val tlbCsr = new TlbCsrBundle
+  val sum = Bool()
+
+  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry]): Unit = {
+    this.mode := mode
+    this.pmp := pmp
+    this.pma := pma
+    this.spmp := 0.U.asTypeOf(Vec(NumSPMP, new PMPEntry()))
+    this.sum := false.B
+  }
 
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry],
-    spmp: Vec[PMPEntry] = Vec(NumSPMP, 0.U.asTypeOf(new PMPEntry)),
-    tlbCsr: TlbCsrBundle = 0.U.asTypeOf(new TlbCsrBundle)
+    spmp: Vec[PMPEntry],
+    sum: Bool = false.B
   ): Unit = {
     this.mode   := mode
     this.pmp    := pmp
     this.pma    := pma
     this.spmp   := spmp
-    this.tlbCsr := tlbCsr
+    this.sum    := sum
   }
 }
 
@@ -516,9 +524,9 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
 
   // for sPMP
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle],
-    spmp: Vec[PMPEntry], tlbCsr: TlbCsrBundle
+    spmp: Vec[PMPEntry], sum: Bool
   ) = {
-    check_env.apply(mode, pmp, pma, spmp, tlbCsr)
+    check_env.apply(mode, pmp, pma, spmp, sum)
     this.req := req
     resp
   }
@@ -548,9 +556,9 @@ class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
 
   // for sPMP
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle],
-    spmp: Vec[PMPEntry], tlbCsr: TlbCsrBundle
+    spmp: Vec[PMPEntry], sum: Bool
   ) = {
-    check_env.apply(mode, pmp, pma, spmp, tlbCsr)
+    check_env.apply(mode, pmp, pma, spmp, sum)
     this.req := req
     resp
   }
@@ -576,7 +584,7 @@ class PMPChecker
 
   val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
   val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
-  val res_spmp = spmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.spmp, io.check_env.mode, lgMaxSize, io.check_env.tlbCsr)
+  val res_spmp = spmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.spmp, io.check_env.mode, lgMaxSize, io.check_env.sum)
 
   val resp_pmp = pmp_check(req.cmd, res_pmp.cfg)
   val resp_pma = pma_check(req.cmd, res_pma.cfg)
@@ -614,7 +622,7 @@ class PMPCheckerv2
 
   val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
   val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
-  val res_spmp = spmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.spmp, io.check_env.mode, lgMaxSize, io.check_env.tlbCsr)
+  val res_spmp = spmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.spmp, io.check_env.mode, lgMaxSize, io.check_env.sum)
 
   val resp = and(res_pmp, res_pma, if (spmpUsed) res_spmp else res_pmp)
 

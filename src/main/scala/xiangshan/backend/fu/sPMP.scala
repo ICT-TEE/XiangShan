@@ -64,7 +64,8 @@ trait SPMPCheckMethod extends SPMPConst {
     spmpEntries: Vec[PMPEntry],
     mode: UInt,
     lgMaxSize: Int,
-    tlbCsr: TlbCsrBundle
+    //tlbCsr: TlbCsrBundle
+    sum: Bool
   ) = {
     val num = spmpEntries.size
     require(num == NumPMA)
@@ -85,7 +86,7 @@ trait SPMPCheckMethod extends SPMPConst {
 
       val cur = WireInit(spmp)
       // check logic （先判断再输出匹配，应该是用来优化时序）
-      val spmpTTCfg = spmp_truth_table_match(spmp.cfg, mode, tlbCsr.priv.sum)
+      val spmpTTCfg = spmp_truth_table_match(spmp.cfg, mode, sum)
       cur.cfg.r := aligned && (spmpTTCfg.r || ignore)
       cur.cfg.w := aligned && (spmpTTCfg.w || ignore)
       cur.cfg.x := aligned && (spmpTTCfg.x || ignore)
