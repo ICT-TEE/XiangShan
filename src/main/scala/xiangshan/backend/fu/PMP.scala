@@ -504,7 +504,9 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   val check_env = Input(new PMPCheckerEnv())
   val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
   val resp = new PMPRespBundle()
+  val sresp = new PMPRespBundle()
 
+  // old, deprecated
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
     check_env.apply(mode, pmp, pma)
     this.req := req
@@ -522,13 +524,13 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
     resp
   }
 
-  // for sPMP
+  // new, for sPMP
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle],
     spmp: Vec[PMPEntry], sum: Bool
   ) = {
     check_env.apply(mode, pmp, pma, spmp, sum)
     this.req := req
-    resp
+    (resp, sresp)
   }
 }
 
@@ -536,6 +538,7 @@ class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   val check_env = Input(new PMPCheckerEnv())
   val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
   val resp = Output(new PMPConfig())
+  val sresp = Output(new PMPConfig())
 
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
     check_env.apply(mode, pmp, pma)
@@ -548,19 +551,20 @@ class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
     this.req.bits.apply(addr)
   }
 
+  // old, deprecated
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], valid: Bool, addr: UInt) = {
     check_env.apply(mode, pmp, pma)
     req_apply(valid, addr)
     resp
   }
 
-  // for sPMP
+  // new, for sPMP
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle],
     spmp: Vec[PMPEntry], sum: Bool
   ) = {
     check_env.apply(mode, pmp, pma, spmp, sum)
     this.req := req
-    resp
+    (resp, sresp)
   }
 }
 
@@ -590,15 +594,16 @@ class PMPChecker
   val resp_pma = pma_check(req.cmd, res_pma.cfg)
   val resp_spmp = spmp_check(req.cmd, res_spmp.cfg)
 
-  val presp = if (pmpUsed) (resp_pmp | resp_pma) else resp_pma
-  val sresp = if (spmpUsed) (presp | resp_spmp) else presp
+  val resp = if (pmpUsed) (resp_pmp | resp_pma) else resp_pma
+  val sresp = if (spmpUsed) resp_spmp else 0.U.asTypeOf(new PMPRespBundle)
   // val resp = Mux(io.check_env.tlbCsr.satp.mode === 0.U, presp, sresp)  无论satp值多少sPMP总是开启
-  val resp = sresp
 
   if (sameCycle || leaveHitMux) {
     io.resp := resp
+    io.sresp := sresp
   } else {
     io.resp := RegEnable(resp, io.req.valid)
+    io.sresp := RegEnable(sresp, io.req.valid)
   }
 }
 
@@ -624,12 +629,15 @@ class PMPCheckerv2
   val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
   val res_spmp = spmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.spmp, io.check_env.mode, lgMaxSize, io.check_env.sum)
 
-  val resp = and(res_pmp, res_pma, if (spmpUsed) res_spmp else res_pmp)
+  val resp = and(res_pmp, res_pma)
+  val sresp = if (spmpUsed) spmpConf(res_spmp) else spmpConf(res_spmp, true.B)
 
   if (sameCycle || leaveHitMux) {
     io.resp := resp
+    io.sresp := sresp
   } else {
     io.resp := RegEnable(resp, io.req.valid)
+    io.sresp := RegEnable(sresp, io.req.valid)
   }
 
   def and(pmp: PMPEntry, pma: PMPEntry): PMPConfig = {
@@ -644,16 +652,11 @@ class PMPCheckerv2
     tmp_res
   }
 
-  // for spmp
-  def and(pmp: PMPEntry, pma: PMPEntry, spmp: PMPEntry): PMPConfig = {
-    val tmp_res = Wire(new PMPConfig)
-    tmp_res.l := DontCare
-    tmp_res.a := DontCare
-    tmp_res.r := pma.cfg.r && pmp.cfg.r && spmp.cfg.r
-    tmp_res.w := pma.cfg.w && pmp.cfg.w && spmp.cfg.w
-    tmp_res.x := pma.cfg.x && pmp.cfg.x && spmp.cfg.x
-    tmp_res.c := pma.cfg.c
-    tmp_res.atomic := pma.cfg.atomic
+  def spmpConf(spmp: PMPEntry, useDefault: Bool = false.B): PMPConfig = {
+    val tmp_res = WireInit(0.U.asTypeOf(new PMPConfig()))
+    tmp_res.r := spmp.cfg.r || useDefault 
+    tmp_res.w := spmp.cfg.w || useDefault
+    tmp_res.x := spmp.cfg.x || useDefault
     tmp_res
   }
 }
