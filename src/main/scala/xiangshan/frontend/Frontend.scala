@@ -88,12 +88,18 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   pmp_req_vec(3) <> ifu.io.pmp.req
 
   for (i <- pmp_check.indices) {
-    pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
+    pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i),
+      pmp.io.spmp, tlbCsr.priv.sum)
   }
   icache.io.pmp(0).resp <> pmp_check(0).resp
   icache.io.pmp(1).resp <> pmp_check(1).resp
   icache.io.pmp(2).resp <> pmp_check(2).resp
   ifu.io.pmp.resp <> pmp_check(3).resp
+  // for spmp checker
+  icache.io.pmp(0).sresp <> pmp_check(0).sresp
+  icache.io.pmp(1).sresp <> pmp_check(1).sresp
+  icache.io.pmp(2).sresp <> pmp_check(2).sresp
+  ifu.io.pmp.sresp <> pmp_check(3).sresp
 
   // val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
   // tlb_req_arb.io.in(0) <> ifu.io.iTLBInter.req
