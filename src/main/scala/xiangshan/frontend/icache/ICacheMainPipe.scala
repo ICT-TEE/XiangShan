@@ -71,6 +71,7 @@ class ICacheMSHRBundle(implicit p: Parameters) extends ICacheBundle{
 class ICachePMPBundle(implicit p: Parameters) extends ICacheBundle{
   val req  = Valid(new PMPReqBundle())
   val resp = Input(new PMPRespBundle())
+  val sresp = Input(new PMPRespBundle())
 }
 
 class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle{
@@ -120,7 +121,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val (toData, dataResp)  = (io.dataArray.toIData,  io.dataArray.fromIData)
   val (toMSHR, fromMSHR)  = (io.mshr.map(_.toMSHR), io.mshr.map(_.fromMSHR))
   val (toITLB, fromITLB)  = (io.itlb.map(_.req), io.itlb.map(_.resp))
-  val (toPMP,  fromPMP)   = (io.pmp.map(_.req), io.pmp.map(_.resp))
+  val (toPMP,  fromPMP, fromSPMP) = (io.pmp.map(_.req), io.pmp.map(_.resp), io.pmp.map(_.sresp))
 
   //Ftq RegNext Register
   val fromFtqReq = fromFtq.bits.pcMemRead
@@ -481,12 +482,17 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val pmpExcpAF = Wire(Vec(PortNumber, Bool()))
   pmpExcpAF(0)  := fromPMP(0).instr
   pmpExcpAF(1)  := fromPMP(1).instr && s2_double_line
+  //sPMP Result
+  val spmpExcpPF = Wire(Vec(PortNumber, Bool()))
+  spmpExcpPF(0)  := fromSPMP(0).instr
+  spmpExcpPF(1)  := fromSPMP(1).instr && s2_double_line
   //exception information
   //short delay exception signal
   val s2_except_pf        = RegEnable(tlbExcpPF, s1_fire)
   val s2_except_tlb_af    = RegEnable(tlbExcpAF, s1_fire)
   //long delay exception signal
   val s2_except_pmp_af    =  DataHoldBypass(pmpExcpAF, RegNext(s1_fire))
+  val s2_except_pmp_pf    =  DataHoldBypass(spmpExcpPF, RegNext(s1_fire))
   // val s2_except_parity_af =  VecInit(s2_parity_error(i) && RegNext(RegNext(s1_fire))                      )
 
   val s2_except    = VecInit((0 until 2).map{i => s2_except_pf(i) || s2_except_tlb_af(i)})
@@ -650,8 +656,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   //deal with not-cache-hit pmp af
   val only_pmp_af = Wire(Vec(2, Bool()))
-  only_pmp_af(0) := s2_except_pmp_af(0) && cacheline_0_miss && !s2_except(0) && s2_valid
-  only_pmp_af(1) := s2_except_pmp_af(1) && cacheline_1_miss && !s2_except(1) && s2_valid && s2_double_line
+  only_pmp_af(0) := (s2_except_pmp_af(0) || s2_except_pmp_pf(0)) && cacheline_0_miss && !s2_except(0) && s2_valid
+  only_pmp_af(1) := (s2_except_pmp_af(1) || s2_except_pmp_pf(1)) && cacheline_1_miss && !s2_except(1) && s2_valid && s2_double_line
 
   switch(wait_state){
     is(wait_idle){
@@ -820,7 +826,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toIFU(i).bits.select    := s2_port_hit(i)
     toIFU(i).bits.paddr     := s2_req_paddr(i)
     toIFU(i).bits.vaddr     := s2_req_vaddr(i)
-    toIFU(i).bits.tlbExcp.pageFault     := s2_except_pf(i)
+    toIFU(i).bits.tlbExcp.pageFault     := s2_except_pf(i) || s2_except_pmp_pf(i)
     toIFU(i).bits.tlbExcp.accessFault   := s2_except_tlb_af(i) || missSlot(i).m_corrupt || s2_except_pmp_af(i)
     toIFU(i).bits.tlbExcp.mmio          := s2_mmio
 
