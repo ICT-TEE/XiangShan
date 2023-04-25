@@ -154,6 +154,7 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val pmpResp = Flipped(new PMPRespBundle)
+    val spmpResp = Flipped(new PMPRespBundle)
     val static_pm = Input(Valid(Bool()))
     val out = Decoupled(new LsPipelineBundle)
   })
@@ -164,6 +165,13 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
     pmp.instr := false.B
     pmp.mmio := io.static_pm.bits
   }
+  val spmp = WireInit(io.spmpResp)
+  when(io.static_pm.valid) {
+    spmp.ld := false.B
+    spmp.st := false.B
+    spmp.instr := false.B
+    spmp.mmio := false.B
+  }
 
   val s2_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
   val is_mmio = io.in.bits.mmio || pmp.mmio
@@ -172,6 +180,7 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   io.out.bits := io.in.bits
   io.out.bits.mmio := is_mmio && !s2_exception
   io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.uop.cf.exceptionVec(storeAccessFault) || pmp.st
+  io.out.bits.uop.cf.exceptionVec(storePageFault) := io.in.bits.uop.cf.exceptionVec(storePageFault) || spmp.st
   io.out.valid := io.in.valid && (!is_mmio || s2_exception)
 }
 
@@ -203,6 +212,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val feedbackSlow = ValidIO(new RSFeedback)
     val tlb = new TlbRequestIO()
     val pmp = Flipped(new PMPRespBundle())
+    val spmp = Flipped(new PMPRespBundle())
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)
@@ -240,6 +250,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   io.feedbackSlow.valid := RegNext(store_s1.io.rsFeedback.valid && !store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s2.io.pmpResp <> io.pmp
+  store_s2.io.spmpResp <> io.spmp
   store_s2.io.static_pm := RegNext(io.tlb.resp.bits.static_pm)
   io.lsq_replenish := store_s2.io.out.bits // mmio and exception
   PipelineConnect(store_s2.io.out, store_s3.io.in, true.B, store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))

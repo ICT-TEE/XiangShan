@@ -88,7 +88,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(lgMaxSize = 3, sameCycle = true)).io))
   pmp.io.distribute_csr := io.csr.distribute_csr
-  pmp_check.foreach(_.check_env.apply(ModeS, pmp.io.pmp, pmp.io.pma))
+  pmp_check.foreach(_.check_env.apply(ModeS, pmp.io.pmp, pmp.io.pma,pmp.io.spmp,priv.sum))
 
   val missQueue = Module(new L2TlbMissQueue)
   val cache = Module(new PtwCache(parentName = outer.parentName + "cache_"))
@@ -298,8 +298,10 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   // pmp
   pmp_check(0).req <> ptw.io.pmp.req
   ptw.io.pmp.resp <> pmp_check(0).resp
+  ptw.io.pmp.sresp <> pmp_check(0).sresp
   pmp_check(1).req <> llptw.io.pmp.req
   llptw.io.pmp.resp <> pmp_check(1).resp
+  llptw.io.pmp.sresp <> pmp_check(1).sresp
 
   llptw_out.ready := outReady(llptw_out.bits.req_info.source, outArbMqPort)
   for (i <- 0 until PtwWidth) {
@@ -310,7 +312,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     outArb(i).in(outArbFsmPort).valid := ptw.io.resp.valid && ptw.io.resp.bits.source===i.U
     outArb(i).in(outArbFsmPort).bits := ptw.io.resp.bits.resp
     outArb(i).in(outArbMqPort).valid := llptw_out.valid && llptw_out.bits.req_info.source===i.U
-    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(resp_pte(llptw_out.bits.id), llptw_out.bits.req_info.vpn, llptw_out.bits.af, true)
+    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(resp_pte(llptw_out.bits.id), llptw_out.bits.req_info.vpn, llptw_out.bits.af, llptw_out.bits.pf, true)
   }
 
   // io.tlb.map(_.resp) <> outArb.map(_.out)
@@ -344,14 +346,14 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     inner_data(index)
   }
 
-  def pte_to_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean) : PtwResp = {
+  def pte_to_ptwResp(pte: UInt, vpn: UInt, af: Bool, pf: Bool, af_first: Boolean) : PtwResp = {
     val pte_in = pte.asTypeOf(new PteBundle())
     val ptw_resp = Wire(new PtwResp())
     ptw_resp.entry.ppn := pte_in.ppn
     ptw_resp.entry.level.map(_ := 2.U)
     ptw_resp.entry.perm.map(_ := pte_in.getPerm())
     ptw_resp.entry.tag := vpn
-    ptw_resp.pf := (if (af_first) !af else true.B) && pte_in.isPf(2.U)
+    ptw_resp.pf := (if (af_first) !af else true.B) && (pte_in.isPf(2.U)|| pf)
     ptw_resp.af := (if (!af_first) pte_in.isPf(2.U) else true.B) && af
     ptw_resp.entry.v := !ptw_resp.pf
     ptw_resp.entry.prefetch := DontCare

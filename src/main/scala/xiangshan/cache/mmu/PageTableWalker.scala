@@ -59,6 +59,7 @@ class PtwFsmIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCons
   val pmp = new Bundle {
     val req = ValidIO(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
+    val sresp = Flipped(new PMPRespBundle())
   }
 
   val refill = Output(new Bundle {
@@ -90,6 +91,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
   val finish = WireInit(false.B)
   val sent_to_pmp = state === s_addr_check || (state === s_check_pte && !finish)
   val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
+  val spmp_pageFault = RegEnable(io.pmp.sresp.ld , sent_to_pmp)
   val pageFault = memPte.isPf(level)
   switch (state) {
     is (s_idle) {
@@ -102,6 +104,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
         vpn := io.req.bits.req_info.vpn
         l1Hit := req.l1Hit
         accessFault := false.B
+        spmp_pageFault := false.B
       }
     }
 
@@ -113,7 +116,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
       when (mem.req.fire()) {
         state := s_mem_resp
       }
-      when (accessFault) {
+      when (accessFault || spmp_pageFault) {
         state := s_check_pte
       }
     }
@@ -137,7 +140,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
         }
         finish := true.B
       } otherwise { // go to next level, access the memory, need pmp check first
-        when (io.pmp.resp.ld) { // pmp check failed, raise access-fault
+        when (io.pmp.resp.ld || io.pmp.sresp.ld) { // pmp check failed, raise access-fault
           // do nothing, RegNext the pmp check result and do it later (mentioned above)
         }.otherwise { // go to next level.
           assert(level === 0.U)
@@ -151,6 +154,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
   when (sfence.valid) {
     state := s_idle
     accessFault := false.B
+    spmp_pageFault := false.B
   }
 
   // memPte is valid when at s_check_pte. when mem.resp.fire, it's not ready.
@@ -158,11 +162,11 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
   val find_pte = is_pte
   val to_find_pte = level === 1.U && !is_pte
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire())
-  io.resp.valid := state === s_check_pte && (find_pte || accessFault)
+  io.resp.valid := state === s_check_pte && (find_pte || accessFault || spmp_pageFault)
   io.resp.bits.source := source
-  io.resp.bits.resp.apply(pageFault && !accessFault, accessFault, Mux(accessFault, af_level, level), memPte, vpn, satp.asid)
+  io.resp.bits.resp.apply((spmp_pageFault || pageFault) && !accessFault, accessFault, Mux((spmp_pageFault || accessFault), af_level, level), memPte, vpn, satp.asid)
 
-  io.llptw.valid := state === s_check_pte && to_find_pte && !accessFault
+  io.llptw.valid := state === s_check_pte && to_find_pte && !accessFault && !spmp_pageFault
   io.llptw.bits.req_info.source := source
   io.llptw.bits.req_info.vpn := vpn
   io.llptw.bits.ppn := memPte.ppn
@@ -177,7 +181,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
   io.pmp.req.bits.size := 3.U // TODO: fix it
   io.pmp.req.bits.cmd := TlbCmd.read
 
-  mem.req.valid := state === s_mem_req && !io.mem.mask && !accessFault
+  mem.req.valid := state === s_mem_req && !io.mem.mask && !accessFault && !spmp_pageFault
   mem.req.bits.addr := mem_addr
   mem.req.bits.id := FsmReqID.U(bMemID.W)
 
@@ -230,6 +234,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val req_info = Output(new L2TlbInnerBundle())
     val id = Output(UInt(bMemID.W))
     val af = Output(Bool())
+    val pf = Output(Bool())
   })
   val mem = new Bundle {
     val req = DecoupledIO(new L2TlbMemReqBundle())
@@ -245,6 +250,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val pmp = new Bundle {
     val req = Valid(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
+    val sresp = Flipped(new PMPRespBundle())
   }
 }
 
@@ -253,6 +259,7 @@ class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val ppn = UInt(ppnLen.W)
   val wait_id = UInt(log2Up(l2tlbParams.llptwsize).W)
   val af = Bool()
+  val pf = Bool()
 }
 
 
@@ -330,8 +337,10 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
     //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
     val accessFault = io.pmp.resp.ld || io.pmp.resp.mmio
+    val pageFault = io.pmp.sresp.ld
     entries(enq_ptr_reg).af := accessFault
-    state(enq_ptr_reg) := Mux(accessFault, state_mem_out, state_mem_req)
+    entries(enq_ptr_reg).pf := pageFault
+    state(enq_ptr_reg) := Mux((pageFault || accessFault), state_mem_out, state_mem_req)
   }
 
   when (mem_arb.io.out.fire()) {
@@ -372,6 +381,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.out.bits.req_info := entries(mem_ptr).req_info
   io.out.bits.id := mem_ptr
   io.out.bits.af := entries(mem_ptr).af
+  io.out.bits.pf := entries(mem_ptr).pf
 
   io.mem.req.valid := mem_arb.io.out.valid && !flush
   io.mem.req.bits.addr := MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.req_info.vpn, 0))
