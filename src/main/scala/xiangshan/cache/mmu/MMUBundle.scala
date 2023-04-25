@@ -80,6 +80,7 @@ class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val r = Bool()
 
   val pm = new TlbPMBundle
+  val spmp = new TlbPMBundle
 
   override def toPrintable: Printable = {
     p"pf:${pf} af:${af} d:${d} a:${a} g:${g} u:${u} x:${x} w:${w} r:${r} " +
@@ -231,7 +232,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     }
   }
 
-  def apply(item: PtwResp, asid: UInt, pm: PMPConfig): TlbEntry = {
+  def apply(item: PtwResp, asid: UInt, pm: PMPConfig, spmp: PMPConfig): TlbEntry = {
     this.tag := {if (pageNormal) item.entry.tag else item.entry.tag(vpnLen-1, vpnnLen)}
     this.asid := asid
     val inner_level = item.entry.level.getOrElse(0.U)
@@ -255,6 +256,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     this.perm.r := ptePerm.r
 
     this.perm.pm.assign_ap(pm)
+    this.perm.spmp.assign_ap(spmp)
 
     this
   }
@@ -320,6 +322,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     val wayIdx = Output(UInt(log2Up(nWays).W))
     val data = Output(new PtwResp)
     val data_replenish = Output(new PMPConfig)
+    val spmp_data_replenish = Output(new PMPConfig)
   }))
   val victim = new Bundle {
     val out = ValidIO(Output(new Bundle {
@@ -340,11 +343,12 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     (this.r.resp_hit_sameCycle(i), this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm)
   }
 
-  def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp, data_replenish: PMPConfig): Unit = {
+  def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp, data_replenish: PMPConfig, spmp_data_replenish: PMPConfig): Unit = {
     this.w.valid := valid
     this.w.bits.wayIdx := wayIdx
     this.w.bits.data := data
     this.w.bits.data_replenish := data_replenish
+    this.w.bits.spmp_data_replenish := spmp_data_replenish
   }
 
 }
@@ -450,6 +454,7 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
   val requestor = Vec(Width, Flipped(new TlbRequestIO(nRespDups)))
   val ptw = new TlbPtwIO(Width)
   val ptw_replenish = Input(new PMPConfig())
+  val spmp_ptw_replenish = Input(new PMPConfig())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
   val pmp = Vec(Width, ValidIO(new PMPReqBundle()))
 

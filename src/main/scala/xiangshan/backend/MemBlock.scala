@@ -261,16 +261,18 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   ))
   val tlbcsr_pmp = tlbcsr_dup.drop(2).map(RegNext(_))
   for (((p,d),i) <- (pmp_check zip dtlb_pmps).zipWithIndex) {
-    p.apply(tlbcsr_pmp(i).priv.dmode, pmp.io.pmp, pmp.io.pma, d)
+    p.apply(tlbcsr_pmp(i).priv.dmode, pmp.io.pmp, pmp.io.pma, d,pmp.io.spmp,tlbcsr_pmp(i).priv.sum)
     require(p.req.bits.size.getWidth == d.bits.size.getWidth)
   }
   val pmp_check_ptw = Module(new PMPCheckerv2(lgMaxSize = 3, sameCycle = false, leaveHitMux = true))
   pmp_check_ptw.io.apply(
     tlbcsr_pmp.last.priv.dmode,
     pmp.io.pmp, pmp.io.pma, io.ptw.resp.valid,
-    Cat(io.ptw.resp.bits.data.entry.ppn, 0.U(12.W)).asUInt
+    Cat(io.ptw.resp.bits.data.entry.ppn, 0.U(12.W)).asUInt,
+    pmp.io.spmp,tlbcsr_pmp.last.priv.sum
   )
   dtlb.foreach(_.ptw_replenish := pmp_check_ptw.io.resp)
+  dtlb.foreach(_.spmp_ptw_replenish := pmp_check_ptw.io.sresp)
 
   val tdata = RegInit(VecInit(Seq.fill(TriggerNum)(0.U.asTypeOf(new MatchTriggerIO))))
   val tEnable = RegInit(VecInit(Seq.fill(TriggerNum)(false.B)))
@@ -311,6 +313,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     loadUnits(i).io.tlb <> dtlb_reqs.take(exuParameters.LduCnt)(i)
     // pmp
     loadUnits(i).io.pmp <> pmp_check(i).resp
+    loadUnits(i).io.spmp <> pmp_check(i).sresp
     // prefetch
     prefetcherOpt.foreach(pf => {
       pf.io.ld_in(i).valid := Mux(pf_train_on_hit,
@@ -408,6 +411,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     // dtlb
     stu.io.tlb          <> dtlb_reqs.drop(ld_tlb_ports)(i)
     stu.io.pmp          <> pmp_check(i+ld_tlb_ports).resp
+    stu.io.spmp          <> pmp_check(i+ld_tlb_ports).sresp
 
     // store unit does not need fast feedback
     io.rsfeedback(exuParameters.LduCnt + i).feedbackFast := DontCare
@@ -584,6 +588,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   atomicsUnit.io.dtlb.resp.bits  := DontCare
   atomicsUnit.io.dtlb.req.ready  := amoTlb.req.ready
   atomicsUnit.io.pmpResp := pmp_check(0).resp
+  atomicsUnit.io.spmpResp := pmp_check(0).sresp
 
   atomicsUnit.io.dcache <> dcache.io.lsu.atomics
   atomicsUnit.io.flush_sbuffer.empty := sbuffer.io.flush.empty

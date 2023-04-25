@@ -172,15 +172,20 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
       val stPf = (stPermFail || pf) && (TlbCmd.isWrite(cmdReg) || TlbCmd.isAmo(cmdReg))
       val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
       val fault_valid = vmEnable_dup(i)
-      resp(i).bits.excp(d).pf.ld := (ldPf || ldUpdate) && fault_valid && !af
-      resp(i).bits.excp(d).pf.st := (stPf || stUpdate) && fault_valid && !af
-      resp(i).bits.excp(d).pf.instr := (instrPf || instrUpdate) && fault_valid && !af
+
+      val spmp = normal_perm(d).spmp
+      val spm_v = !super_hit && vmEnable_dup(i) && q.partialStaticPMP.B // static pm valid; do not use normal_hit, it's too long.
+      // for tlb without sram, tlb will miss, pm should be ignored outsize
+      resp(i).bits.excp(d).pf.ld := (ldPf || ldUpdate ||(spm_v && !spmp.r)) && fault_valid && !af
+      resp(i).bits.excp(d).pf.st := (stPf || stUpdate ||(spm_v && !spmp.w)) && fault_valid && !af
+      resp(i).bits.excp(d).pf.instr := (instrPf || instrUpdate ||(spm_v && !spmp.x)) && fault_valid && !af
       // NOTE: pf need && with !af, page fault has higher priority than access fault
       // but ptw may also have access fault, then af happens, the translation is wrong.
       // In this case, pf has lower priority than af
 
+     // val spmp = normal_perm(d).spmp
       val spm = normal_perm(d).pm // static physical memory protection or attribute
-      val spm_v = !super_hit && vmEnable_dup(i) && q.partialStaticPMP.B // static pm valid; do not use normal_hit, it's too long.
+    //  val spm_v = !super_hit && vmEnable_dup(i) && q.partialStaticPMP.B // static pm valid; do not use normal_hit, it's too long.
       // for tlb without sram, tlb will miss, pm should be ignored outsize
       resp(i).bits.excp(d).af.ld    := (af || (spm_v && !spm.r)) && TlbCmd.isRead(cmdReg) && fault_valid
       resp(i).bits.excp(d).af.st    := (af || (spm_v && !spm.w)) && TlbCmd.isWrite(cmdReg) && fault_valid
@@ -233,14 +238,16 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     else refill && ptw_resp.entry.is_normalentry()},
     wayIdx = normal_refill_idx,
     data = ptw_resp,
-    data_replenish = io.ptw_replenish
+    data_replenish = io.ptw_replenish,
+    spmp_data_replenish = io.spmp_ptw_replenish
   )
   superPage.w_apply(
     valid = { if (q.normalAsVictim) refill
     else refill && !ptw_resp.entry.is_normalentry()},
     wayIdx = super_refill_idx,
     data = ptw_resp,
-    data_replenish = io.ptw_replenish
+    data_replenish = io.ptw_replenish,
+    spmp_data_replenish = io.spmp_ptw_replenish
   )
 
   // if sameCycle, just req.valid
@@ -404,6 +411,7 @@ object TLB {
         tlb.io.requestor(i).resp.ready := in(i).resp.ready
       }
       tlb.io.ptw_replenish <> DontCare // itlb only use reg, so no static pmp/pma
+      tlb.io.spmp_ptw_replenish <> DontCare
     }
     tlb.io.ptw
   }

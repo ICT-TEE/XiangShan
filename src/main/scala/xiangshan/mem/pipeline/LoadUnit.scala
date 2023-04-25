@@ -270,6 +270,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     val rsFeedback = ValidIO(new RSFeedback)
     val dcacheResp = Flipped(DecoupledIO(new BankedDCacheWordResp))
     val pmpResp = Flipped(new PMPRespBundle())
+    val spmpResp = Flipped(new PMPRespBundle())
     val lsq = new LoadForwardQueryIO
     val dataInvalidSqIdx = Input(UInt())
     val sbuffer = new LoadForwardQueryIO
@@ -293,6 +294,13 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     pmp.instr := false.B
     pmp.mmio := io.static_pm.bits
   }
+  val spmp = WireInit(io.spmpResp)
+  when(io.static_pm.valid) {
+    spmp.ld := false.B
+    spmp.st := false.B
+    spmp.instr := false.B
+    spmp.mmio := false.B
+  }
 
   val s2_is_prefetch = io.in.bits.isSoftPrefetch
 
@@ -302,6 +310,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // will be force writebacked to rob
   val s2_exception_vec = WireInit(io.in.bits.uop.cf.exceptionVec)
   s2_exception_vec(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || pmp.ld
+  s2_exception_vec(loadPageFault) := io.in.bits.uop.cf.exceptionVec(loadPageFault) || spmp.ld
   // soft prefetch will not trigger any exception (but ecc error interrupt may be triggered)
   when (s2_is_prefetch) {
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)
@@ -339,7 +348,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
     RegNext(io.csrCtrl.ldld_vio_check_enable)
   val s2_data_invalid = io.lsq.dataInvalid && !s2_ldld_violation && !s2_exception
 
-  io.dcache_kill := pmp.ld || pmp.mmio // move pmp resp kill to outside
+  io.dcache_kill := pmp.ld || pmp.mmio || spmp.ld// move pmp resp kill to outside
   io.dcacheResp.ready := true.B
   val dcacheShouldResp = !(s2_tlb_miss || s2_exception || s2_mmio || s2_is_prefetch)
   assert(!(io.in.valid && (dcacheShouldResp && !io.dcacheResp.valid)), "DCache response got lost")
@@ -509,6 +518,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
 
     val tlb = new TlbRequestIO(2)
     val pmp = Flipped(new PMPRespBundle()) // arrive same to tlb now
+    val spmp = Flipped(new PMPRespBundle())
 
     // provide prefetch info
     val prefetch_train = ValidIO(new LsPipelineBundle())
@@ -624,6 +634,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
   io.dcache.s2_kill := load_s2.io.dcache_kill // to kill mmio resp which are redirected
   load_s2.io.dcacheResp <> io.dcache.resp
   load_s2.io.pmpResp <> io.pmp
+  load_s2.io.spmpResp <> io.spmp
   load_s2.io.static_pm := RegNext(io.tlb.resp.bits.static_pm)
   load_s2.io.lsq.forwardData <> io.lsq.forward.forwardData
   load_s2.io.lsq.forwardMask <> io.lsq.forward.forwardMask

@@ -37,6 +37,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val dcache        = new AtomicWordIO
     val dtlb          = new TlbRequestIO(2)
     val pmpResp       = Flipped(new PMPRespBundle())
+    val spmpResp       = Flipped(new PMPRespBundle())
     val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
     val feedbackSlow  = ValidIO(new RSFeedback)
@@ -172,11 +173,18 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       pmp.instr := false.B
       pmp.mmio := static_pm.bits
     }
+    val spmp = WireInit(io.spmpResp)
+    when(static_pm.valid) {
+      spmp.ld := false.B
+      spmp.st := false.B
+      spmp.instr := false.B
+      spmp.mmio := false.B
+    }
     is_mmio := pmp.mmio
     // NOTE: only handle load/store exception here, if other exception happens, don't send here
     val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
       exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
-    val exception_pa = pmp.st || pmp.ld
+    val exception_pa = pmp.st || pmp.ld || spmp.ld || spmp.st
     when (exception_va || exception_pa) {
       state := s_finish
       out_valid := true.B
@@ -187,6 +195,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // update storeAccessFault bit
     exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || pmp.ld && isLr
     exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || pmp.ld && !isLr
+    exceptionVec(loadPageFault) := exceptionVec(loadPageFault) || spmp.ld && isLr
+    exceptionVec(storePageFault) := exceptionVec(storePageFault) || spmp.st || spmp.ld && !isLr
   }
 
   when (state === s_flush_sbuffer_req) {
