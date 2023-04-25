@@ -559,11 +559,11 @@ class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   }
 
   // new, for sPMP
-  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle],
+  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], valid: Bool, addr: UInt,
     spmp: Vec[PMPEntry], sum: Bool
   ) = {
     check_env.apply(mode, pmp, pma, spmp, sum)
-    this.req := req
+    req_apply(valid, addr)
     (resp, sresp)
   }
 }
