@@ -164,7 +164,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire())
   io.resp.valid := state === s_check_pte && (find_pte || accessFault || spmp_pageFault)
   io.resp.bits.source := source
-  io.resp.bits.resp.apply((spmp_pageFault || pageFault) && !accessFault, accessFault, Mux((spmp_pageFault || accessFault), af_level, level), memPte, vpn, satp.asid)
+  io.resp.bits.resp.apply(pageFault && !accessFault && !spmp_pageFault, spmp_pageFault && !accessFault , accessFault, Mux(spmp_pageFault || accessFault, af_level, level), memPte, vpn, satp.asid)
 
   io.llptw.valid := state === s_check_pte && to_find_pte && !accessFault && !spmp_pageFault
   io.llptw.bits.req_info.source := source
@@ -234,7 +234,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val req_info = Output(new L2TlbInnerBundle())
     val id = Output(UInt(bMemID.W))
     val af = Output(Bool())
-    val pf = Output(Bool())
+    val spmp_pf = Output(Bool())
   })
   val mem = new Bundle {
     val req = DecoupledIO(new L2TlbMemReqBundle())
@@ -259,7 +259,7 @@ class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val ppn = UInt(ppnLen.W)
   val wait_id = UInt(log2Up(l2tlbParams.llptwsize).W)
   val af = Bool()
-  val pf = Bool()
+  val spmp_pf = Bool()
 }
 
 
@@ -337,10 +337,10 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
     //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
     val accessFault = io.pmp.resp.ld || io.pmp.resp.mmio
-    val pageFault = io.pmp.sresp.ld
+    val spmp_pageFault = io.pmp.sresp.ld
     entries(enq_ptr_reg).af := accessFault
-    entries(enq_ptr_reg).pf := pageFault
-    state(enq_ptr_reg) := Mux((pageFault || accessFault), state_mem_out, state_mem_req)
+    entries(enq_ptr_reg).spmp_pf := spmp_pageFault
+    state(enq_ptr_reg) := Mux((spmp_pageFault || accessFault), state_mem_out, state_mem_req)
   }
 
   when (mem_arb.io.out.fire()) {
@@ -381,7 +381,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.out.bits.req_info := entries(mem_ptr).req_info
   io.out.bits.id := mem_ptr
   io.out.bits.af := entries(mem_ptr).af
-  io.out.bits.pf := entries(mem_ptr).pf
+  io.out.bits.spmp_pf := entries(mem_ptr).spmp_pf
 
   io.mem.req.valid := mem_arb.io.out.valid && !flush
   io.mem.req.bits.addr := MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.req_info.vpn, 0))

@@ -158,6 +158,8 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
 
       val pf = perm.pf
       val af = perm.af
+      val spmp_pf = perm.spmp_pf
+
       val paddr = Cat(ppn, offReg)
       resp(i).bits.paddr(d) := Mux(vmEnable_dup(i), paddr, if (!q.sameCycle) RegNext(vaddr) else vaddr)
 
@@ -173,12 +175,18 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
       val instrPf = (instrPermFail || pf) && TlbCmd.isExec(cmdReg)
       val fault_valid = vmEnable_dup(i)
 
-      val spmp = normal_perm(d).spmp
+
+
+      resp(i).bits.excp(d).pf.ld := (ldPf || ldUpdate) && fault_valid && !af && !spmp_pf
+      resp(i).bits.excp(d).pf.st := (stPf || stUpdate) && fault_valid && !af && !spmp_pf
+      resp(i).bits.excp(d).pf.instr := (instrPf || instrUpdate) && fault_valid && !af && !spmp_pf
+
       val spm_v = !super_hit && vmEnable_dup(i) && q.partialStaticPMP.B // static pm valid; do not use normal_hit, it's too long.
       // for tlb without sram, tlb will miss, pm should be ignored outsize
-      resp(i).bits.excp(d).pf.ld := (ldPf || ldUpdate ||(spm_v && !spmp.r)) && fault_valid && !af
-      resp(i).bits.excp(d).pf.st := (stPf || stUpdate ||(spm_v && !spmp.w)) && fault_valid && !af
-      resp(i).bits.excp(d).pf.instr := (instrPf || instrUpdate ||(spm_v && !spmp.x)) && fault_valid && !af
+      val spmp = normal_perm(d).spmp
+      resp(i).bits.excp(d).spmp_pf.ld := (spmp_pf || (spm_v && !spmp.r)) && TlbCmd.isRead(cmdReg) && fault_valid && !af
+      resp(i).bits.excp(d).spmp_pf.st := (spmp_pf || (spm_v && !spmp.w)) && TlbCmd.isWrite(cmdReg) && fault_valid && !af
+      resp(i).bits.excp(d).spmp_pf.instr := (spmp_pf || (spm_v && !spmp.x)) && TlbCmd.isExec(cmdReg) && fault_valid && !af
       // NOTE: pf need && with !af, page fault has higher priority than access fault
       // but ptw may also have access fault, then af happens, the translation is wrong.
       // In this case, pf has lower priority than af

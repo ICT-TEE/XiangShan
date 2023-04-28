@@ -148,6 +148,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp(0).pf.ld
       exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld
+      exceptionVec(storespmpPageFault)  := io.dtlb.resp.bits.excp(0).spmp_pf.st
+      exceptionVec(loadspmpPageFault)   := io.dtlb.resp.bits.excp(0).spmp_pf.ld
       static_pm := io.dtlb.resp.bits.static_pm
 
       when (!io.dtlb.resp.bits.miss) {
@@ -195,8 +197,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // update storeAccessFault bit
     exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || pmp.ld && isLr
     exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || pmp.ld && !isLr
-    exceptionVec(loadPageFault) := exceptionVec(loadPageFault) || spmp.ld && isLr
-    exceptionVec(storePageFault) := exceptionVec(storePageFault) || spmp.st || spmp.ld && !isLr
+    exceptionVec(loadspmpPageFault) := exceptionVec(loadspmpPageFault) || spmp.ld && isLr
+    exceptionVec(storespmpPageFault) := exceptionVec(storespmpPageFault) || spmp.st || spmp.ld && !isLr
   }
 
   when (state === s_flush_sbuffer_req) {

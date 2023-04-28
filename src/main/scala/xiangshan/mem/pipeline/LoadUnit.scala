@@ -245,6 +245,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   // af & pf exception were modified
   io.out.bits.uop.cf.exceptionVec(loadPageFault) := io.dtlbResp.bits.excp(0).pf.ld
   io.out.bits.uop.cf.exceptionVec(loadAccessFault) := io.dtlbResp.bits.excp(0).af.ld
+  io.out.bits.uop.cf.exceptionVec(loadspmpPageFault) := io.dtlbResp.bits.excp(0).spmp_pf.ld
 
   io.out.bits.ptwBack := io.dtlbResp.bits.ptwBack
   io.out.bits.rsIdx := io.in.bits.rsIdx
@@ -310,7 +311,7 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   // will be force writebacked to rob
   val s2_exception_vec = WireInit(io.in.bits.uop.cf.exceptionVec)
   s2_exception_vec(loadAccessFault) := io.in.bits.uop.cf.exceptionVec(loadAccessFault) || pmp.ld
-  s2_exception_vec(loadPageFault) := io.in.bits.uop.cf.exceptionVec(loadPageFault) || spmp.ld
+  s2_exception_vec(loadspmpPageFault) := io.in.bits.uop.cf.exceptionVec(loadspmpPageFault) || spmp.ld
   // soft prefetch will not trigger any exception (but ecc error interrupt may be triggered)
   when (s2_is_prefetch) {
     s2_exception_vec := 0.U.asTypeOf(s2_exception_vec.cloneType)

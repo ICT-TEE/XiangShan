@@ -180,7 +180,7 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   io.out.bits := io.in.bits
   io.out.bits.mmio := is_mmio && !s2_exception
   io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.uop.cf.exceptionVec(storeAccessFault) || pmp.st
-  io.out.bits.uop.cf.exceptionVec(storePageFault) := io.in.bits.uop.cf.exceptionVec(storePageFault) || spmp.st
+  io.out.bits.uop.cf.exceptionVec(storespmpPageFault) := io.in.bits.uop.cf.exceptionVec(storespmpPageFault) || spmp.st
   io.out.valid := io.in.valid && (!is_mmio || s2_exception)
 }
 
