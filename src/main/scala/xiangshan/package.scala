@@ -149,7 +149,7 @@ package object xiangshan {
   }
 
   object ExceptionVec {
-    def apply() = Vec(16, Bool())
+    def apply() = Vec(19, Bool())
   }
 
   object PMAMode {
@@ -524,9 +524,13 @@ package object xiangshan {
     def loadPageFault       = 13
     // def singleStep          = 14
     def storePageFault      = 15
+    def instrspmpPagrFault  = 16
+    def loadspmpPageFault   = 17
+    def storespmpPageFault  = 18
     def priorities = Seq(
       breakPoint, // TODO: different BP has different priority
       instrPageFault,
+      instrspmpPagrFault,
       instrAccessFault,
       illegalInstr,
       instrAddrMisaligned,
@@ -535,6 +539,8 @@ package object xiangshan {
       loadAddrMisaligned,
       storePageFault,
       loadPageFault,
+      storespmpPageFault,
+      loadspmpPageFault,
       storeAccessFault,
       loadAccessFault
     )

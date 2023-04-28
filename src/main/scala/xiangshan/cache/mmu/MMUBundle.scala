@@ -69,6 +69,7 @@ class TlbPMBundle(implicit p: Parameters) extends TlbBundle {
 
 class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val pf = Bool() // NOTE: if this is true, just raise pf
+  val spmp_pf = Bool()
   val af = Bool() // NOTE: if this is true, just raise af
   // pagetable perm (software defined)
   val d = Bool()
@@ -414,6 +415,7 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val excp = Vec(nDups, new Bundle {
     val pf = new TlbExceptionBundle()
     val af = new TlbExceptionBundle()
+    val spmp_pf = new TlbExceptionBundle()
   })
   val static_pm = Output(Valid(Bool())) // valid for static, bits for mmio result from normal entries
   val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
@@ -715,9 +717,10 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
   val entry = new PtwEntry(tagLen = vpnLen, hasPerm = true, hasLevel = true)
   val pf = Bool()
   val af = Bool()
+  val spmp_pf = Bool()
 
 
-  def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt) = {
+  def apply(pf: Bool, spmp_pf:Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt) = {
     this.entry.level.map(_ := level)
     this.entry.tag := vpn
     this.entry.perm.map(_ := pte.getPerm())
@@ -727,6 +730,7 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
     this.entry.v := !pf
     this.pf := pf
     this.af := af
+    this.spmp_pf := spmp_pf
   }
 
   override def toPrintable: Printable = {
