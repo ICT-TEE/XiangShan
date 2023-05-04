@@ -298,10 +298,10 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   // pmp
   pmp_check(0).req <> ptw.io.pmp.req
   ptw.io.pmp.resp <> pmp_check(0).resp
-  ptw.io.pmp.sresp <> pmp_check(0).sresp
+
   pmp_check(1).req <> llptw.io.pmp.req
   llptw.io.pmp.resp <> pmp_check(1).resp
-  llptw.io.pmp.sresp <> pmp_check(1).sresp
+
 
   llptw_out.ready := outReady(llptw_out.bits.req_info.source, outArbMqPort)
   for (i <- 0 until PtwWidth) {
@@ -312,7 +312,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     outArb(i).in(outArbFsmPort).valid := ptw.io.resp.valid && ptw.io.resp.bits.source===i.U
     outArb(i).in(outArbFsmPort).bits := ptw.io.resp.bits.resp
     outArb(i).in(outArbMqPort).valid := llptw_out.valid && llptw_out.bits.req_info.source===i.U
-    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(resp_pte(llptw_out.bits.id), llptw_out.bits.req_info.vpn, llptw_out.bits.af, llptw_out.bits.spmp_pf, true)
+    outArb(i).in(outArbMqPort).bits := pte_to_ptwResp(resp_pte(llptw_out.bits.id), llptw_out.bits.req_info.vpn, llptw_out.bits.af, true)
   }
 
   // io.tlb.map(_.resp) <> outArb.map(_.out)
@@ -346,15 +346,15 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
     inner_data(index)
   }
 
-  def pte_to_ptwResp(pte: UInt, vpn: UInt, af: Bool, spmp_pf: Bool, af_first: Boolean) : PtwResp = {
+  def pte_to_ptwResp(pte: UInt, vpn: UInt, af: Bool, af_first: Boolean) : PtwResp = {
     val pte_in = pte.asTypeOf(new PteBundle())
     val ptw_resp = Wire(new PtwResp())
     ptw_resp.entry.ppn := pte_in.ppn
     ptw_resp.entry.level.map(_ := 2.U)
     ptw_resp.entry.perm.map(_ := pte_in.getPerm())
     ptw_resp.entry.tag := vpn
-    ptw_resp.pf := (if (af_first) (!af && !spmp_pf) else true.B) && pte_in.isPf(2.U)
-    ptw_resp.spmp_pf := (if (af_first) !af else true.B) && spmp_pf
+    ptw_resp.pf := (if (af_first) !af  else true.B) && pte_in.isPf(2.U)
+
     ptw_resp.af := (if (!af_first) pte_in.isPf(2.U) else true.B) && af
     ptw_resp.entry.v := !ptw_resp.pf
     ptw_resp.entry.prefetch := DontCare
