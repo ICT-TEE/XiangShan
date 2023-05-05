@@ -34,6 +34,8 @@ class SPMPBase(implicit p: Parameters) extends PMPBase {
     for (i <- cfgVec.indices) {
       val cfg_w_m_tmp = cfgs((i+1)*8-1, i*8).asUInt.asTypeOf(new PMPConfig)
       cfgVec(i) := cfg_w_m_tmp
+      // 过滤保留位
+      when(!(cfgVec(i).r | cfgVec(i).w | cfgVec(i).x)) { cfgVec(i).s := false.B }
       // 过滤NA4，重新生成mask
       if (CoarserGrain) { cfgVec(i).a := Cat(cfg_w_m_tmp.a(1), cfg_w_m_tmp.a.orR) }
       when (cfgVec(i).na4_napot) {
