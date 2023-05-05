@@ -149,7 +149,7 @@ package object xiangshan {
   }
 
   object ExceptionVec {
-    def apply() = Vec(16, Bool())
+    def apply() = Vec(19, Bool())
   }
 
   object PMAMode {
@@ -524,9 +524,13 @@ package object xiangshan {
     def loadPageFault       = 13
     // def singleStep          = 14
     def storePageFault      = 15
+    def instrspmpPagrFault  = 16
+    def loadspmpPageFault   = 17
+    def storespmpPageFault  = 18
     def priorities = Seq(
       breakPoint, // TODO: different BP has different priority
       instrPageFault,
+      instrspmpPagrFault,
       instrAccessFault,
       illegalInstr,
       instrAddrMisaligned,
@@ -535,6 +539,8 @@ package object xiangshan {
       loadAddrMisaligned,
       storePageFault,
       loadPageFault,
+      storespmpPageFault,
+      loadspmpPageFault,
       storeAccessFault,
       loadAccessFault
     )
@@ -734,7 +740,7 @@ package object xiangshan {
     (uop: MicroOp) => FuType.loadCanAccept(uop.ctrl.fuType),
     FuType.ldu, 1, 0, writeIntRf = true, writeFpRf = true,
     latency = UncertainLatency(),
-    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault),
+    exceptionOut = Seq(loadAddrMisaligned, loadAccessFault, loadPageFault,loadspmpPageFault),
     flushPipe = true,
     replayInst = true,
     hasLoadError = true,
@@ -747,7 +753,7 @@ package object xiangshan {
     (uop: MicroOp) => FuType.storeCanAccept(uop.ctrl.fuType),
     FuType.stu, 1, 0, writeIntRf = false, writeFpRf = false,
     latency = UncertainLatency(),
-    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault),
+    exceptionOut = Seq(storeAddrMisaligned, storeAccessFault, storePageFault,storespmpPageFault),
     trigger = true,
   )
 

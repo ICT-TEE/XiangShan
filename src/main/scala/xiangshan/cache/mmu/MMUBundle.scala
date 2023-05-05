@@ -69,6 +69,7 @@ class TlbPMBundle(implicit p: Parameters) extends TlbBundle {
 
 class TlbPermBundle(implicit p: Parameters) extends TlbBundle {
   val pf = Bool() // NOTE: if this is true, just raise pf
+
   val af = Bool() // NOTE: if this is true, just raise af
   // pagetable perm (software defined)
   val d = Bool()
@@ -232,7 +233,7 @@ class TlbEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parameters) 
     }
   }
 
-  def apply(item: PtwResp, asid: UInt, pm: PMPConfig, spmp: PMPConfig): TlbEntry = {
+  def apply(item: PtwResp, asid: UInt, pm: PMPConfig, spmp:PMPConfig): TlbEntry = {
     this.tag := {if (pageNormal) item.entry.tag else item.entry.tag(vpnLen-1, vpnnLen)}
     this.asid := asid
     val inner_level = item.entry.level.getOrElse(0.U)
@@ -343,12 +344,13 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
     (this.r.resp_hit_sameCycle(i), this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm)
   }
 
-  def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp, data_replenish: PMPConfig, spmp_data_replenish: PMPConfig): Unit = {
+  def w_apply(valid: Bool, wayIdx: UInt, data: PtwResp, data_replenish: PMPConfig,spmp_data_replenish: PMPConfig): Unit = {
     this.w.valid := valid
     this.w.bits.wayIdx := wayIdx
     this.w.bits.data := data
     this.w.bits.data_replenish := data_replenish
     this.w.bits.spmp_data_replenish := spmp_data_replenish
+
   }
 
 }
@@ -414,6 +416,7 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val excp = Vec(nDups, new Bundle {
     val pf = new TlbExceptionBundle()
     val af = new TlbExceptionBundle()
+    val spmp_pf = new TlbExceptionBundle()
   })
   val static_pm = Output(Valid(Bool())) // valid for static, bits for mmio result from normal entries
   val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
@@ -717,6 +720,7 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
   val af = Bool()
 
 
+
   def apply(pf: Bool, af: Bool, level: UInt, pte: PteBundle, vpn: UInt, asid: UInt) = {
     this.entry.level.map(_ := level)
     this.entry.tag := vpn
@@ -727,6 +731,7 @@ class PtwResp(implicit p: Parameters) extends PtwBundle {
     this.entry.v := !pf
     this.pf := pf
     this.af := af
+
   }
 
   override def toPrintable: Printable = {
