@@ -119,6 +119,7 @@ class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
   val ftqOffset    = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
   val ipf          = Vec(PredictWidth, Bool())
   val acf          = Vec(PredictWidth, Bool())
+  val spf          = Vec(PredictWidth, Bool())
   val crossPageIPFFix = Vec(PredictWidth, Bool())
   val triggered    = Vec(PredictWidth, new TriggerCf)
 }

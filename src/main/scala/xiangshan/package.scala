@@ -548,6 +548,7 @@ package object xiangshan {
     def frontendSet = Seq(
       instrAddrMisaligned,
       instrAccessFault,
+      instrSpmpPageFault,
       illegalInstr,
       instrPageFault
     )

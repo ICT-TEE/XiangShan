@@ -963,6 +963,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val exceptionVecFromRob   = csrio.exception.bits.uop.cf.exceptionVec
   val hasException          = csrio.exception.valid && !csrio.exception.bits.isInterrupt
   val hasInstrPageFault     = hasException && exceptionVecFromRob(instrPageFault)
+  val hasInstrSpmpPageFault = hasException && exceptionVecFromRob(instrSpmpPageFault)
   val hasLoadPageFault      = hasException && exceptionVecFromRob(loadPageFault)
   val hasStorePageFault     = hasException && exceptionVecFromRob(storePageFault)
   val hasStoreAddrMisalign  = hasException && exceptionVecFromRob(storeAddrMisaligned)
@@ -1018,6 +1019,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val memExceptionAddr = SignExt(csrio.memExceptionVAddr, XLEN)
   val updateTval = VecInit(Seq(
     hasInstrPageFault,
+    hasInstrSpmpPageFault,
     hasLoadPageFault,
     hasStorePageFault,
     hasLoadSpmpPageFault,
@@ -1030,7 +1032,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   )).asUInt.orR
   when (RegNext(RegNext(updateTval))) {
       val tval = Mux(
-        RegNext(RegNext(hasInstrPageFault || hasInstrAccessFault)),
+        RegNext(RegNext(hasInstrPageFault || hasInstrAccessFault || hasInstrSpmpPageFault)),
         RegNext(RegNext(Mux(
           csrio.exception.bits.uop.cf.crossPageIPFFix,
           SignExt(csrio.exception.bits.uop.cf.pc + 2.U, XLEN),
@@ -1108,7 +1110,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       //do nothing
     }.elsewhen (delegS) {
       scause := causeNO
-      sepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
+      sepc := Mux(hasInstrPageFault || hasInstrAccessFault || hasInstrSpmpPageFault, iexceptionPC, dexceptionPC)
       mstatusNew.spp := priviledgeMode
       mstatusNew.pie.s := mstatusOld.ie.s
       mstatusNew.ie.s := false.B
@@ -1116,7 +1118,7 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
       when (clearTval) { stval := 0.U }
     }.otherwise {
       mcause := causeNO
-      mepc := Mux(hasInstrPageFault || hasInstrAccessFault, iexceptionPC, dexceptionPC)
+      mepc := Mux(hasInstrPageFault || hasInstrAccessFault || hasInstrSpmpPageFault, iexceptionPC, dexceptionPC)
       mstatusNew.mpp := priviledgeMode
       mstatusNew.pie.m := mstatusOld.ie.m
       mstatusNew.ie.m := false.B
