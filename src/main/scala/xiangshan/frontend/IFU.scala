@@ -242,8 +242,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f2_except_pf    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.pageFault))
   val f2_except_af    = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.accessFault))
+  val f2_except_spf   = VecInit((0 until PortNumber).map(i => fromICache(i).bits.tlbExcp.spmpPageFault))
   val f2_mmio         = fromICache(0).bits.tlbExcp.mmio && !fromICache(0).bits.tlbExcp.accessFault &&
-                                                           !fromICache(0).bits.tlbExcp.pageFault
+                                                           !fromICache(0).bits.tlbExcp.pageFault &&
+                                                           !fromICache(0).bits.tlbExcp.spmpPageFault
 
   val f2_pc               = RegEnable(next = f1_pc, enable = f1_fire)
   val f2_half_snpc        = RegEnable(next = f1_half_snpc, enable = f1_fire)
@@ -265,6 +267,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f2_instr_range = f2_jump_range & f2_ftr_range
   val f2_pf_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_pf(0)   ||  isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine &&  f2_except_pf(1))))
   val f2_af_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_af(0)   ||  isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine && f2_except_af(1))))
+  val f2_spf_vec = VecInit((0 until PredictWidth).map(i => (!isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_except_spf(0)   ||  isNextLine(f2_pc(i), f2_ftq_req.startAddr) && f2_doubleLine &&  f2_except_spf(1))))
 
   val f2_paddrs       = VecInit((0 until PortNumber).map(i => fromICache(i).bits.paddr))
   val f2_perf_info    = io.icachePerfInfo
@@ -364,6 +367,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_jump_offset    = RegEnable(next = f2_jump_offset, enable = f2_fire)
   val f3_af_vec         = RegEnable(next = f2_af_vec,      enable = f2_fire)
   val f3_pf_vec         = RegEnable(next = f2_pf_vec ,     enable = f2_fire)
+  val f3_spf_vec        = RegEnable(next = f2_spf_vec ,    enable = f2_fire)
   val f3_pc             = RegEnable(next = f2_pc,          enable = f2_fire)
   val f3_half_snpc        = RegEnable(next = f2_half_snpc, enable = f2_fire)
   val f3_instr_range    = RegEnable(next = f2_instr_range, enable = f2_fire)
@@ -385,6 +389,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val mmio_resend_addr =RegInit(0.U(PAddrBits.W))
   val mmio_resend_af  = RegInit(false.B)
   val mmio_resend_pf  = RegInit(false.B)
+  val mmio_resend_spf = RegInit(false.B)
 
   //last instuction finish
   val is_first_instr = RegInit(true.B)
@@ -480,7 +485,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
       val pmpExcpPF = io.pmp.sresp.instr    // for spmp
       mmio_state :=  Mux(pmpExcpAF || pmpExcpPF, m_waitCommit , m_resendReq)
       mmio_resend_af := pmpExcpAF
-      mmio_resend_pf := pmpExcpPF
+      mmio_resend_spf := pmpExcpPF
     }
 
     is(m_resendReq){
@@ -601,6 +606,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   io.toIbuffer.bits.foldpc      := f3_foldpc
   io.toIbuffer.bits.ipf         := VecInit(f3_pf_vec.zip(f3_crossPageFault).map{case (pf, crossPF) => pf || crossPF})
   io.toIbuffer.bits.acf         := f3_af_vec
+  io.toIbuffer.bits.spf         := f3_spf_vec
   io.toIbuffer.bits.crossPageIPFFix := f3_crossPageFault
   io.toIbuffer.bits.triggered   := f3_triggered
 
@@ -652,6 +658,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
     io.toIbuffer.bits.acf(0) := mmio_resend_af
     io.toIbuffer.bits.ipf(0) := mmio_resend_pf
+    io.toIbuffer.bits.spf(0) := mmio_resend_spf
     io.toIbuffer.bits.crossPageIPFFix(0) := mmio_resend_pf
 
     io.toIbuffer.bits.enqEnable   := f3_mmio_range.asUInt

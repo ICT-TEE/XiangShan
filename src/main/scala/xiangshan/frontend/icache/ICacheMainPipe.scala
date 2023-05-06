@@ -43,6 +43,7 @@ class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle
   val tlbExcp  = new Bundle{
     val pageFault = Bool()
     val accessFault = Bool()
+    val spmpPageFault = Bool()
     val mmio = Bool()
   }
 }
@@ -826,8 +827,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toIFU(i).bits.select    := s2_port_hit(i)
     toIFU(i).bits.paddr     := s2_req_paddr(i)
     toIFU(i).bits.vaddr     := s2_req_vaddr(i)
-    toIFU(i).bits.tlbExcp.pageFault     := s2_except_pf(i) || s2_except_pmp_pf(i)
+    toIFU(i).bits.tlbExcp.pageFault     := s2_except_pf(i)
     toIFU(i).bits.tlbExcp.accessFault   := s2_except_tlb_af(i) || missSlot(i).m_corrupt || s2_except_pmp_af(i)
+    toIFU(i).bits.tlbExcp.spmpPageFault := s2_except_pmp_pf(i)
     toIFU(i).bits.tlbExcp.mmio          := s2_mmio
 
     when(RegNext(s2_fire && missSlot(i).m_corrupt)){

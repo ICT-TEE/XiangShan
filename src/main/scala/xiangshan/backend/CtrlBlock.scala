@@ -418,7 +418,8 @@ class CtrlBlockImp(outer: CtrlBlock)(implicit p: Parameters) extends LazyModuleI
   // pipeline between decode and rename
   for (i <- 0 until RenameWidth) {
     // fusion decoder
-    val decodeHasException = io.frontend.cfVec(i).bits.exceptionVec(instrPageFault) || io.frontend.cfVec(i).bits.exceptionVec(instrAccessFault)
+    val decodeHasException = io.frontend.cfVec(i).bits.exceptionVec(instrPageFault) || io.frontend.cfVec(i).bits.exceptionVec(instrAccessFault) ||
+      io.frontend.cfVec(i).bits.exceptionVec(instrSpmpPageFault)
     val disableFusion = decode.io.csrCtrl.singlestep || !decode.io.csrCtrl.fusion_enable
     fusionDecoder.io.in(i).valid := io.frontend.cfVec(i).valid && !(decodeHasException || disableFusion)
     fusionDecoder.io.in(i).bits := io.frontend.cfVec(i).bits.instr
