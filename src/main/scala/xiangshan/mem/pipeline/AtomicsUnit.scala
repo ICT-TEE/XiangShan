@@ -185,7 +185,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     is_mmio := pmp.mmio
     // NOTE: only handle load/store exception here, if other exception happens, don't send here
     val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
-      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
+      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) || exceptionVec(loadSpmpPageFault) || exceptionVec(storeSpmpPageFault)
     val exception_pa = pmp.st || pmp.ld || spmp.ld || spmp.st
     when (exception_va || exception_pa) {
       state := s_finish
