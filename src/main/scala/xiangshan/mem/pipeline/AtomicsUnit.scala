@@ -148,8 +148,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       exceptionVec(loadPageFault)       := io.dtlb.resp.bits.excp(0).pf.ld
       exceptionVec(storeAccessFault)    := io.dtlb.resp.bits.excp(0).af.st
       exceptionVec(loadAccessFault)     := io.dtlb.resp.bits.excp(0).af.ld
-      exceptionVec(storespmpPageFault)  := io.dtlb.resp.bits.excp(0).spmp_pf.st
-      exceptionVec(loadspmpPageFault)   := io.dtlb.resp.bits.excp(0).spmp_pf.ld
+      exceptionVec(storeSpmpPageFault)  := io.dtlb.resp.bits.excp(0).spmp_pf.st
+      exceptionVec(loadSpmpPageFault)   := io.dtlb.resp.bits.excp(0).spmp_pf.ld
       static_pm := io.dtlb.resp.bits.static_pm
 
       when (!io.dtlb.resp.bits.miss) {
@@ -185,7 +185,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     is_mmio := pmp.mmio
     // NOTE: only handle load/store exception here, if other exception happens, don't send here
     val exception_va = exceptionVec(storePageFault) || exceptionVec(loadPageFault) ||
-      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault)
+      exceptionVec(storeAccessFault) || exceptionVec(loadAccessFault) || exceptionVec(loadSpmpPageFault) || exceptionVec(storeSpmpPageFault)
     val exception_pa = pmp.st || pmp.ld || spmp.ld || spmp.st
     when (exception_va || exception_pa) {
       state := s_finish
@@ -197,8 +197,8 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     // update storeAccessFault bit
     exceptionVec(loadAccessFault) := exceptionVec(loadAccessFault) || pmp.ld && isLr
     exceptionVec(storeAccessFault) := exceptionVec(storeAccessFault) || pmp.st || pmp.ld && !isLr
-    exceptionVec(loadspmpPageFault) := exceptionVec(loadspmpPageFault) || spmp.ld && isLr
-    exceptionVec(storespmpPageFault) := exceptionVec(storespmpPageFault) || spmp.st || spmp.ld && !isLr
+    exceptionVec(loadSpmpPageFault) := exceptionVec(loadSpmpPageFault) || spmp.ld && isLr
+    exceptionVec(storeSpmpPageFault) := exceptionVec(storeSpmpPageFault) || spmp.st || spmp.ld && !isLr
   }
 
   when (state === s_flush_sbuffer_req) {
