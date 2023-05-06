@@ -964,6 +964,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
   val hasStorePageFault     = hasException && exceptionVecFromRob(storePageFault)
   val hasStoreAddrMisalign  = hasException && exceptionVecFromRob(storeAddrMisaligned)
   val hasLoadAddrMisalign   = hasException && exceptionVecFromRob(loadAddrMisaligned)
+  val hasLoadSpmpPageFault  = hasException && exceptionVecFromRob(loadSpmpPageFault)
+  val hasStoreSpmpPageFault = hasException && exceptionVecFromRob(storeSpmpPageFault)
   val hasInstrAccessFault   = hasException && exceptionVecFromRob(instrAccessFault)
   val hasLoadAccessFault    = hasException && exceptionVecFromRob(loadAccessFault)
   val hasStoreAccessFault   = hasException && exceptionVecFromRob(storeAccessFault)
@@ -1015,6 +1017,8 @@ class CSR(implicit p: Parameters) extends FunctionUnit with HasCSRConst with PMP
     hasInstrPageFault,
     hasLoadPageFault,
     hasStorePageFault,
+    hasLoadSpmpPageFault,
+    hasStoreSpmpPageFault,
     hasInstrAccessFault,
     hasLoadAccessFault,
     hasStoreAccessFault,
