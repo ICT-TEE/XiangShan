@@ -135,6 +135,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   io.out.bits.mmio := s1_mmio
   io.out.bits.uop.cf.exceptionVec(storePageFault) := io.dtlbResp.bits.excp(0).pf.st
   io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.dtlbResp.bits.excp(0).af.st
+  io.out.bits.uop.cf.exceptionVec(storeSpmpPageFault) := io.dtlbResp.bits.excp(0).spmp_pf.st
 
   io.lsq.valid := io.in.valid
   io.lsq.bits := io.out.bits
