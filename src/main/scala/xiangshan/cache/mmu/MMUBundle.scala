@@ -451,7 +451,7 @@ class TlbIO(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Parame
   val ptw = new TlbPtwIO(Width)
   val ptw_replenish = Input(new PMPConfig())
   val replace = if (q.outReplace) Flipped(new TlbReplaceIO(Width, q)) else null
-  val pmp = Vec(Width, ValidIO(new PMPReqBundle()))
+  val pmp = Vec(Width, DecoupledIO(new PMPReqBundle()))
 
 }
 
