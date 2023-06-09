@@ -88,9 +88,8 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
   io.req.ready := state === s_idle
 
   val finish = WireInit(false.B)
-  val sent_to_pmp = state === s_addr_check || (state === s_check_pte && !finish)
-  val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
-  val AccessFault = io.pmp.resp.ld || io.pmp.resp.mmio //pmptable
+  val sent_to_pmp = (state === s_addr_check || state === s_pm_waiting) && !pmptable_miss
+  val AccessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
   val pageFault = memPte.isPf(level)
   val pmptable_miss = io.pmp.resp.ld //fake miss
   val is_pte = memPte.isLeaf() || memPte.isPf(level)
@@ -130,14 +129,11 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
 
     is (s_mem_resp) {
       when(mem.resp.fire()) {
-        when(!pmptable_miss) {
           state := s_check_pte
-        }.otherwise{
-          state := s_pm_waiting
         }
-        af_level := af_level + 1.U
+      af_level := af_level + 1.U
       }
-    }
+
     is(s_pm_waiting){
       when(find_pte || llptw_valid || !pmptable_miss) {
         state := s_check_pte
