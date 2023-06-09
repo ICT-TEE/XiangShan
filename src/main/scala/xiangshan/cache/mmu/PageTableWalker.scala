@@ -76,7 +76,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
   val satp = io.csr.satp
   val flush = io.sfence.valid || io.csr.satp.changed
 
-  val s_idle :: s_addr_check :: s_mem_req :: s_mem_resp :: s_check_pte :: Nil = Enum(5)
+  val s_idle :: s_addr_check :: s_mem_req :: s_mem_resp :: s_pm_waiting :: s_check_pte :: Nil = Enum(5)
   val state = RegInit(s_idle)
   val level = RegInit(0.U(log2Up(Level).W))
   val af_level = RegInit(0.U(log2Up(Level).W)) // access fault return this level
@@ -88,9 +88,14 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
   io.req.ready := state === s_idle
 
   val finish = WireInit(false.B)
-  val sent_to_pmp = state === s_addr_check || (state === s_check_pte && !finish)
-  val accessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
+  val sent_to_pmp = (state === s_addr_check || state === s_pm_waiting) && !pmptable_miss
+  val AccessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
   val pageFault = memPte.isPf(level)
+  val pmptable_miss = io.pmp.resp.ld //fake miss
+  val is_pte = memPte.isLeaf() || memPte.isPf(level)
+  val find_pte = is_pte
+  val to_find_pte = level === 1.U && !is_pte
+  val llptw_valid = state === s_pm_waiting && to_find_pte
   switch (state) {
     is (s_idle) {
       when (io.req.fire()) {
@@ -101,27 +106,39 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
         ppn := Mux(req.l1Hit, io.req.bits.ppn, satp.ppn)
         vpn := io.req.bits.req_info.vpn
         l1Hit := req.l1Hit
-        accessFault := false.B
+        AccessFault := false.B
       }
     }
 
     is (s_addr_check) {
-      state := s_mem_req
+      when(pmptable_miss){
+        state:= s_addr_check
+      }otherwise {
+        state := s_mem_req
+      }
     }
 
     is (s_mem_req) {
       when (mem.req.fire()) {
         state := s_mem_resp
       }
-      when (accessFault) {
+      when (AccessFault) {
         state := s_check_pte
       }
     }
 
     is (s_mem_resp) {
       when(mem.resp.fire()) {
+          state := s_check_pte
+        }
+      af_level := af_level + 1.U
+      }
+
+    is(s_pm_waiting){
+      when(find_pte || llptw_valid || !pmptable_miss) {
         state := s_check_pte
-        af_level := af_level + 1.U
+      }.otherwise{
+        state := s_pm_waiting
       }
     }
 
@@ -137,32 +154,30 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
         }
         finish := true.B
       } otherwise { // go to next level, access the memory, need pmp check first
-        when (io.pmp.resp.ld) { // pmp check failed, raise access-fault
+        //when (io.pmp.resp.ld) { // pmp check failed, raise access-fault
           // do nothing, RegNext the pmp check result and do it later (mentioned above)
-        }.otherwise { // go to next level.
+        //}.otherwise { // go to next level.
           assert(level === 0.U)
           level := levelNext
           state := s_mem_req
-        }
+        //}
       }
     }
   }
 
   when (sfence.valid) {
     state := s_idle
-    accessFault := false.B
+    AccessFault := false.B
   }
 
   // memPte is valid when at s_check_pte. when mem.resp.fire, it's not ready.
-  val is_pte = memPte.isLeaf() || memPte.isPf(level)
-  val find_pte = is_pte
-  val to_find_pte = level === 1.U && !is_pte
-  val source = RegEnable(io.req.bits.req_info.source, io.req.fire())
-  io.resp.valid := state === s_check_pte && (find_pte || accessFault)
-  io.resp.bits.source := source
-  io.resp.bits.resp.apply(pageFault && !accessFault, accessFault, Mux(accessFault, af_level, level), memPte, vpn, satp.asid)
 
-  io.llptw.valid := state === s_check_pte && to_find_pte && !accessFault
+  val source = RegEnable(io.req.bits.req_info.source, io.req.fire())
+  io.resp.valid := state === s_check_pte && (find_pte || AccessFault)
+  io.resp.bits.source := source
+  io.resp.bits.resp.apply(pageFault && !AccessFault, AccessFault, Mux(AccessFault, af_level, level), memPte, vpn, satp.asid)
+
+  io.llptw.valid := state === s_check_pte && to_find_pte && !AccessFault
   io.llptw.bits.req_info.source := source
   io.llptw.bits.req_info.vpn := vpn
   io.llptw.bits.ppn := memPte.ppn
@@ -177,7 +192,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
   io.pmp.req.bits.size := 3.U // TODO: fix it
   io.pmp.req.bits.cmd := TlbCmd.read
 
-  mem.req.valid := state === s_mem_req && !io.mem.mask && !accessFault
+  mem.req.valid := state === s_mem_req && !io.mem.mask && !AccessFault
   mem.req.bits.addr := mem_addr
   mem.req.bits.id := FsmReqID.U(bMemID.W)
 

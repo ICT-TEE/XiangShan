@@ -48,7 +48,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
-  val s_invalid :: s_tlb :: s_pm :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(8)
+  val s_invalid :: s_tlb :: s_pm_waiting :: s_pm_check :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(8)
   val state = RegInit(s_invalid)
   val out_valid = RegInit(false.B)
   val data_valid = RegInit(false.B)
@@ -157,14 +157,23 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
           state := s_finish
           out_valid := true.B
           atom_override_xtval := true.B
-        } .otherwise {
-          state := s_pm
+        }.elsewhen(static_pm.valid){
+          state := s_pm_check
+        }.otherwise {
+          state := s_pm_waiting
         }
       }
     }
   }
-
-  when (state === s_pm) {
+  val pmptable_miss = io.pmpResp.ld    //fake miss
+  when (state === s_pm_waiting){
+    when (!pmptable_miss){
+      state := s_pm_check
+    }.otherwise{
+      state := s_pm_waiting
+    }
+  }
+  when (state === s_pm_check) {
     val pmp = WireInit(io.pmpResp)
     when (static_pm.valid) {
       pmp.ld := false.B
