@@ -69,8 +69,9 @@ class ICacheMSHRBundle(implicit p: Parameters) extends ICacheBundle{
 }
 
 class ICachePMPBundle(implicit p: Parameters) extends ICacheBundle{
-  val req  = Valid(new PMPReqBundle())
+  val req  = Decoupled(new PMPReqBundle())
   val resp = Input(new PMPRespBundle())
+  val miss = Input(Bool())
 }
 
 class ICachePerfInfo(implicit p: Parameters) extends ICacheBundle{
@@ -293,11 +294,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     * - get tlb resp data (exceptiong info and physical addresses)
     * - get Meta/Data SRAM read responses (latched for pipeline stop)
     * - tag compare/hit check
+    * - send PMP check req
     ******************************************************************************
     */
 
   /** s1 control */
   val tlbRespAllValid = WireInit(false.B)
+  val pmpRespAllValid = WireInit(false.B)
 
   val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = tlb_miss_flush, lastFlush = false.B)
 
@@ -312,8 +315,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_tlb_latch_resp_pf = RegEnable(next = tlb_slot.tlb_resp_pf, enable = s0_fire)
   val s1_tlb_latch_resp_af = RegEnable(next = tlb_slot.tlb_resp_af, enable = s0_fire)
 
-  s1_ready := s2_ready && tlbRespAllValid  || !s1_valid
-  s1_fire  := s1_valid && tlbRespAllValid && s2_ready && !tlb_miss_flush
+  s1_ready := s2_ready && tlbRespAllValid && pmpRespAllValid  || !s1_valid
+  s1_fire  := s1_valid && tlbRespAllValid && pmpRespAllValid && s2_ready && !tlb_miss_flush
 
   fromITLB.map(_.ready := true.B)
 
@@ -321,7 +324,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_tlb_all_resp_wire       =  RegNext(s0_fire)
   val s1_tlb_all_resp_reg        =  RegInit(false.B)
 
-  when(s1_valid && s1_tlb_all_resp_wire && !tlb_miss_flush && !s2_ready)   {s1_tlb_all_resp_reg := true.B}
+  when(s1_valid && s1_tlb_all_resp_wire && !tlb_miss_flush && (!s2_ready || io.pmp.map(_.miss).reduce(_||_)))   {s1_tlb_all_resp_reg := true.B}
   .elsewhen(s1_fire && s1_tlb_all_resp_reg)             {s1_tlb_all_resp_reg := false.B}
 
   tlbRespAllValid := s1_tlb_all_resp_wire || s1_tlb_all_resp_reg
@@ -369,6 +372,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   ((replacers zip touch_sets) zip touch_ways).map{case ((r, s),w) => r.access(s,w)}
 
+  //send physical address to PMP
+  io.pmp.zipWithIndex.map { case (p, i) =>
+    // p.req.valid := s1_valid && !tlb_miss_flush && !missSwitchBit
+    p.req.valid := RegNext(s0_fire) && !tlb_miss_flush && !missSwitchBit
+    p.req.bits.addr := s1_req_paddr(i)
+    p.req.bits.size := 3.U
+    p.req.bits.cmd := TlbCmd.exec
+  }
+
+  pmpRespAllValid := io.pmp.map(!_.miss).reduce(_&&_)
 
   /** <PERF> replace victim way number */
 
@@ -495,12 +508,12 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_mmio      = DataHoldBypass(io.pmp(0).resp.mmio && !s2_except_tlb_af(0) && !s2_except_pmp_af(0) && !s2_except_pf(0), RegNext(s1_fire)).asBool() && s2_valid
  
   //send physical address to PMP
-  io.pmp.zipWithIndex.map { case (p, i) =>
-    p.req.valid := s2_valid && !missSwitchBit
-    p.req.bits.addr := s2_req_paddr(i)
-    p.req.bits.size := 3.U // TODO
-    p.req.bits.cmd := TlbCmd.exec
-  }
+  // io.pmp.zipWithIndex.map { case (p, i) =>
+  //   p.req.valid := s2_valid && !missSwitchBit
+  //   p.req.bits.addr := s2_req_paddr(i)
+  //   p.req.bits.size := 3.U // TODO
+  //   p.req.bits.cmd := TlbCmd.exec
+  // }
 
   /*** cacheline miss logic ***/
   val wait_idle :: wait_queue_ready :: wait_send_req  :: wait_two_resp :: wait_0_resp :: wait_1_resp :: wait_one_resp ::wait_finish :: wait_pmp_except :: Nil = Enum(9)

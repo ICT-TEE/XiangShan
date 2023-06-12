@@ -390,7 +390,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val is_first_instr = RegInit(true.B)
   io.mmioCommitRead.mmioFtqPtr := RegNext(f3_ftq_req.ftqIdx + 1.U)
 
-  val m_idle :: m_waitLastCmt:: m_sendReq :: m_waitResp :: m_sendTLB :: m_tlbResp :: m_sendPMP :: m_resendReq :: m_waitResendResp :: m_waitCommit :: m_commited :: Nil = Enum(11)
+  val m_idle :: m_waitLastCmt:: m_sendReq :: m_waitResp :: m_sendTLB :: m_tlbResp :: m_sendPMP :: m_pmpResp :: m_resendReq :: m_waitResendResp :: m_waitCommit :: m_commited :: Nil = Enum(12)
   val mmio_state = RegInit(m_idle)
 
   val f3_req_is_mmio     = f3_mmio && f3_valid
@@ -476,6 +476,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
     }
 
     is(m_sendPMP){
+      mmio_state :=  Mux(io.pmp.miss, m_sendPMP , m_pmpResp)
+    }
+
+    is(m_pmpResp){
       val pmpExcpAF = io.pmp.resp.instr || !io.pmp.resp.mmio
       mmio_state :=  Mux(pmpExcpAF, m_waitCommit , m_resendReq)
       mmio_resend_af := pmpExcpAF
