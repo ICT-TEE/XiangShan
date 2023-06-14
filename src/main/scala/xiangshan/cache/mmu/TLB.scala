@@ -369,7 +369,6 @@ object TLB {
 
     val tlb = Module(new TLB(width, nRespDups, q))
 
-    tlb.io.pmp.map(_.ready := DontCare)
     tlb.io.sfence <> sfence
     tlb.io.csr <> csr
     tlb.suggestName(s"tlb_${q.name}")

@@ -57,7 +57,7 @@ class PtwFsmIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCons
     val mask = Input(Bool())
   }
   val pmp = new Bundle {
-    val req = DecoupledIO(new PMPReqBundle())
+    val req = ValidIO(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
     val miss = Input(Bool())
   }
@@ -259,7 +259,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   }
   val cache = DecoupledIO(new L2TlbInnerBundle())
   val pmp = new Bundle {
-    val req = Decoupled(new PMPReqBundle())
+    val req = Valid(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
     val miss = Input(Bool())
   }
