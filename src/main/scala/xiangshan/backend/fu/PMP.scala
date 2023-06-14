@@ -466,14 +466,14 @@ class PMPCheckerEnv(implicit p: Parameters) extends PMPBundle {
 
 class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   val check_env = Input(new PMPCheckerEnv())
-  val req = Flipped(Decoupled(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
+  val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
   val resp = new PMPRespBundle()
   val miss = Output(Bool())
   // val flush = Input(Bool())
 
-  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: DecoupledIO[PMPReqBundle]) = {
+  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
     check_env.apply(mode, pmp, pma)
-    this.req <> req
+    this.req := req
     resp
   }
 
@@ -536,7 +536,6 @@ class PMPChecker
   val resp_pma = pma_check(req.cmd, res_pma.cfg)
   val resp = if (pmpUsed) (resp_pmp | resp_pma) else resp_pma
 
-  io.req.ready := true.B
   io.miss := false.B
 
   if (sameCycle || leaveHitMux) {
@@ -559,7 +558,6 @@ class PMPChecker
 
     io.miss := Mux(io.req.fire, !(Mux(rand(3), rand(2,0), 0.U) === 0.U), !(cnt === 0.U))
 
-    //io.req.ready := RegNext(!io.miss)
     io.resp := Mux(RegNext(io.miss), 15.U(4.W).asTypeOf(new PMPRespBundle), resp) // miss: ret 0b1111
 
     if (!pmpUsed) {
