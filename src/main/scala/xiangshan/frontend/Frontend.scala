@@ -86,7 +86,13 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
 // pmp
   val pmp = Module(new PMP())
-  val pmp_check = VecInit(Seq.fill(4)(Module(new PMPChecker(3, sameCycle = true)).io))
+  // val pmp_check = VecInit(Seq.fill(4)(Module(new PMPChecker(3, sameCycle = true)).io))
+  val pmp_check = VecInit(Seq(
+    Module(new PMPChecker(tableTest = true)).io,
+    Module(new PMPChecker(tableTest = true)).io,
+    Module(new PMPChecker(tableTest = true, pmpUsed = false)).io,
+    Module(new PMPChecker(tableTest = true)).io
+  ))
   pmp.io.distribute_csr := csrCtrl.distribute_csr
   val pmp_req_vec     = Wire(Vec(4, Decoupled(new PMPReqBundle())))
   pmp_req_vec(0) <> icache.io.pmp(0).req
@@ -101,6 +107,11 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   icache.io.pmp(1).resp <> pmp_check(1).resp
   icache.io.pmp(2).resp <> pmp_check(2).resp
   ifu.io.pmp.resp <> pmp_check(3).resp
+  
+  icache.io.pmp(0).miss := pmp_check(0).miss
+  icache.io.pmp(1).miss := pmp_check(1).miss
+  icache.io.pmp(2).miss := pmp_check(2).miss
+  ifu.io.pmp.miss := pmp_check(3).miss
 
   // val tlb_req_arb     = Module(new Arbiter(new TlbReq, 2))
   // tlb_req_arb.io.in(0) <> ifu.io.iTLBInter.req
