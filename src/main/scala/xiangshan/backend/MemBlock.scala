@@ -260,7 +260,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   pmp.io.distribute_csr <> csrCtrl.distribute_csr
 
   val pmp_check = VecInit(Seq.fill(total_tlb_ports)(
-    Module(new PMPChecker(3, leaveHitMux = true, tableTest = true)).io
+    Module(new PMPChecker(3, leaveHitMux = true)).io
   ))
   val tlbcsr_pmp = tlbcsr_dup.drop(2).map(RegNext(_))
   for (((p,d),i) <- (pmp_check zip dtlb_pmps).zipWithIndex) {

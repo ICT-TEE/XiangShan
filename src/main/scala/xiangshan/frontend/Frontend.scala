@@ -88,10 +88,10 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val pmp = Module(new PMP())
   // val pmp_check = VecInit(Seq.fill(4)(Module(new PMPChecker(3, sameCycle = true)).io))
   val pmp_check = VecInit(Seq(
-    Module(new PMPChecker(tableTest = true)).io,
-    Module(new PMPChecker(tableTest = true)).io,
-    Module(new PMPChecker(tableTest = true, pmpUsed = false)).io,
-    Module(new PMPChecker(tableTest = true)).io
+    Module(new PMPChecker()).io,
+    Module(new PMPChecker()).io,
+    Module(new PMPChecker(pmpUsed = false)).io,
+    Module(new PMPChecker()).io
   ))
   pmp.io.distribute_csr := csrCtrl.distribute_csr
   val pmp_req_vec     = Wire(Vec(4, Valid(new PMPReqBundle())))
