@@ -518,8 +518,7 @@ class PMPChecker
   lgMaxSize: Int = 3,
   sameCycle: Boolean = false,
   leaveHitMux: Boolean = false,
-  pmpUsed: Boolean = true,
-  tableTest: Boolean = false  // for test
+  pmpUsed: Boolean = true
 )(implicit p: Parameters) extends PMPModule
   with PMPCheckMethod
   with PMACheckMethod
@@ -527,7 +526,7 @@ class PMPChecker
   require(!(leaveHitMux && sameCycle))
   val io = IO(new PMPCheckIO(lgMaxSize))
 
-  val req = if (tableTest) DataHoldBypass(io.req.bits, io.req.fire) else io.req.bits
+  val req = if (EnablePMPTable) DataHoldBypass(io.req.bits, io.req.fire) else io.req.bits
 
   val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
   val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
@@ -544,7 +543,7 @@ class PMPChecker
     io.resp := RegEnable(resp, io.req.valid)
   }
 
-  if (tableTest) {
+  if (EnablePMPTable) {
     require(!(sameCycle && pmpUsed))
     // miss generate
     val rand = LFSR64(io.req.fire)(3,0)

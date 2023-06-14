@@ -85,7 +85,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   val flush  = sfence_dup(0).valid || satp.changed
 
   val pmp = Module(new PMP())
-  val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(lgMaxSize = 3, tableTest = true)).io))
+  val pmp_check = VecInit(Seq.fill(2)(Module(new PMPChecker(lgMaxSize = 3)).io))
   pmp.io.distribute_csr := io.csr.distribute_csr
   pmp_check.foreach(_.check_env.apply(ModeS, pmp.io.pmp, pmp.io.pma))
 
