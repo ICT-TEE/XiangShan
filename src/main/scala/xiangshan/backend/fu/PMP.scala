@@ -559,7 +559,7 @@ class PMPChecker
 
     io.miss := Mux(io.req.fire, !(Mux(rand(3), rand(2,0), 0.U) === 0.U), !(cnt === 0.U))
 
-    io.req.ready := RegNext(!io.miss)
+    //io.req.ready := RegNext(!io.miss)
     io.resp := Mux(RegNext(io.miss), 15.U(4.W).asTypeOf(new PMPRespBundle), resp) // miss: ret 0b1111
 
     if (!pmpUsed) {

@@ -59,6 +59,7 @@ class PtwFsmIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCons
   val pmp = new Bundle {
     val req = DecoupledIO(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
+    val miss = Input(Bool())
   }
 
   val refill = Output(new Bundle {
@@ -76,7 +77,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
   val satp = io.csr.satp
   val flush = io.sfence.valid || io.csr.satp.changed
 
-  val s_idle :: s_addr_check :: s_mem_req :: s_mem_resp :: s_pm_waiting :: s_check_pte :: Nil = Enum(5)
+  val s_idle :: s_addr_check :: s_mem_req :: s_mem_resp :: s_pm_waiting :: s_check_pte :: Nil = Enum(6)
   val state = RegInit(s_idle)
   val level = RegInit(0.U(log2Up(Level).W))
   val af_level = RegInit(0.U(log2Up(Level).W)) // access fault return this level
@@ -88,10 +89,10 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
   io.req.ready := state === s_idle
 
   val finish = WireInit(false.B)
-  val sent_to_pmp = (state === s_addr_check || state === s_pm_waiting) && !pmptable_miss
+  val pmptable_miss = io.pmp.miss
+  val sent_to_pmp = RegNext((state === s_addr_check || state === s_pm_waiting) && !pmptable_miss)
   val AccessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
   val pageFault = memPte.isPf(level)
-  val pmptable_miss = io.pmp.resp.ld //fake miss
   val is_pte = memPte.isLeaf() || memPte.isPf(level)
   val find_pte = is_pte
   val to_find_pte = level === 1.U && !is_pte
@@ -129,7 +130,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
 
     is (s_mem_resp) {
       when(mem.resp.fire()) {
-          state := s_check_pte
+          state := s_pm_waiting
         }
       af_level := af_level + 1.U
       }
@@ -187,7 +188,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
   val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
   val l2addr = MakeAddr(Mux(l1Hit, ppn, memPte.ppn), getVpnn(vpn, 1))
   val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
-  io.pmp.req.valid := DontCare // samecycle, do not use valid
+  io.pmp.req.valid := RegNext(io.req.fire() || mem.resp.fire())
   io.pmp.req.bits.addr := mem_addr
   io.pmp.req.bits.size := 3.U // TODO: fix it
   io.pmp.req.bits.cmd := TlbCmd.read
@@ -260,6 +261,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val pmp = new Bundle {
     val req = Decoupled(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
+    val miss = Input(Bool())
   }
 }
 
@@ -277,17 +279,19 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val flush = io.sfence.valid || io.csr.satp.changed
   val entries = Reg(Vec(l2tlbParams.llptwsize, new LLPTWEntry()))
-  val state_idle :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: state_cache :: Nil = Enum(6)
+  val state_idle :: state_pmp_waiting :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: state_cache :: Nil = Enum(7)
   val state = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(state_idle)))
 
   val is_emptys = state.map(_ === state_idle)
+  val is_pmpwait = state.map(_ === state_pmp_waiting)
   val is_mems = state.map(_ === state_mem_req)
   val is_waiting = state.map(_ === state_mem_waiting)
   val is_having = state.map(_ === state_mem_out)
   val is_cache = state.map(_ === state_cache)
-
   val full = !ParallelOR(is_emptys).asBool()
   val enq_ptr = ParallelPriorityEncoder(is_emptys)
+  val non_pmpwait = !ParallelOR(is_pmpwait).asBool()
+  val pmpwait_id = ParallelPriorityEncoder(is_pmpwait)//show which entry is doing pmpcheck
 
   val mem_ptr = ParallelPriorityEncoder(is_having) // TODO: optimize timing, bad: entries -> ptr -> entry
   val mem_arb = Module(new RRArbiterInit(new LLPTWEntry(), l2tlbParams.llptwsize))
@@ -318,8 +322,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val mem_resp_hit = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(false.B)))
   val enq_state_normal = Mux(to_mem_out, state_mem_out, // same to the blew, but the mem resp now
     Mux(to_wait, state_mem_waiting,
-    Mux(to_cache, state_cache, state_addr_check)))
-  val enq_state = Mux(from_pre(io.in.bits.req_info.source) && enq_state_normal =/= state_addr_check, state_idle, enq_state_normal)
+    Mux(to_cache, state_cache, state_pmp_waiting)))
+  val enq_state = Mux(from_pre(io.in.bits.req_info.source) && enq_state_normal =/= state_pmp_waiting, state_idle, enq_state_normal)
   when (io.in.fire()) {
     // if prefetch req does not need mem access, just give it up.
     // so there will be at most 1 + FilterSize entries that needs re-access page cache
@@ -331,27 +335,37 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     entries(enq_ptr).af := false.B
     mem_resp_hit(enq_ptr) := to_mem_out
   }
-
+  val pmptable_miss = io.pmp.miss
+  val pmptable_miss_reg = RegNext(pmptable_miss)
+  val pmpwait_id_reg = RegNext(pmpwait_id)
   val enq_ptr_reg = RegNext(enq_ptr)
-  val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire() && !flush)
+  val need_addr_check_empty = RegNext(non_pmpwait && enq_state === state_pmp_waiting && io.in.fire()) && !flush //no state in pmp_waiting
+  val need_addr_check_busy = state(pmpwait_id) === state_pmp_waiting && state(pmpwait_id_reg) === state_addr_check && !flush//lase cycle have state in pmp_waiting
   val last_enq_vpn = RegEnable(io.in.bits.req_info.vpn, io.in.fire())
 
-  io.pmp.req.valid := need_addr_check
-  io.pmp.req.bits.addr := RegEnable(MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0)), io.in.fire())
+  io.pmp.req.valid := need_addr_check_empty || need_addr_check_busy
+  io.pmp.req.bits.addr := MakeAddr(entries(pmpwait_id).ppn, getVpnn(entries(pmpwait_id).req_info.vpn, 0))
   io.pmp.req.bits.cmd := TlbCmd.read
   io.pmp.req.bits.size := 3.U // TODO: fix it
-  val pmp_resp_valid = io.pmp.req.valid // same cycle
-  when (pmp_resp_valid) {
+ // val pmp_resp_valid = io.pmp.req.valid // same cycle
+  when (!pmptable_miss_reg && state(pmpwait_id_reg) === state_addr_check && !flush) {
     // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
     //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
     val accessFault = io.pmp.resp.ld || io.pmp.resp.mmio
-    entries(enq_ptr_reg).af := accessFault
-    state(enq_ptr_reg) := Mux(accessFault, state_mem_out, state_mem_req)
+    entries(pmpwait_id_reg).af := accessFault
+    state(pmpwait_id_reg) := Mux(accessFault, state_mem_out, state_mem_req)
+  }
+  when (state(pmpwait_id) === state_pmp_waiting ) {
+    when(!pmptable_miss) {
+      state(pmpwait_id) := state_addr_check
+    }.otherwise{
+      state(pmpwait_id) := state_pmp_waiting
+    }
   }
 
   when (mem_arb.io.out.fire()) {
     for (i <- state.indices) {
-      when (state(i) =/= state_idle && dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)) {
+      when (state(i) =/= state_idle && state(i) =/= state_pmp_waiting && dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)) {
         // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
         state(i) := state_mem_waiting
         entries(i).wait_id := mem_arb.io.chosen

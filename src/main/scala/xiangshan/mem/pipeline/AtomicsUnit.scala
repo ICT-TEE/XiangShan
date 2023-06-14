@@ -37,6 +37,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
     val dcache        = new AtomicWordIO
     val dtlb          = new TlbRequestIO(2)
     val pmpResp       = Flipped(new PMPRespBundle())
+    val pmptable_miss = Input(Bool())
     val rsIdx         = Input(UInt(log2Up(IssQueSize).W))
     val flush_sbuffer = new SbufferFlushBundle
     val feedbackSlow  = ValidIO(new RSFeedback)
@@ -48,7 +49,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
   //-------------------------------------------------------
   // Atomics Memory Accsess FSM
   //-------------------------------------------------------
-  val s_invalid :: s_tlb :: s_pm_waiting :: s_pm_check :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(8)
+  val s_invalid :: s_tlb :: s_pm_waiting :: s_pm_check :: s_flush_sbuffer_req :: s_flush_sbuffer_resp :: s_cache_req :: s_cache_resp :: s_finish :: Nil = Enum(9)
   val state = RegInit(s_invalid)
   val out_valid = RegInit(false.B)
   val data_valid = RegInit(false.B)
@@ -165,7 +166,7 @@ class AtomicsUnit(implicit p: Parameters) extends XSModule with MemoryOpConstant
       }
     }
   }
-  val pmptable_miss = io.pmpResp.ld    //fake miss
+  val pmptable_miss = io.pmptable_miss    //fake miss
   when (state === s_pm_waiting){
     when (!pmptable_miss){
       state := s_pm_check
