@@ -88,7 +88,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
   val pmp = Module(new PMP())
   val pmp_check = VecInit(Seq.fill(4)(Module(new PMPChecker(3, sameCycle = true)).io))
   pmp.io.distribute_csr := csrCtrl.distribute_csr
-  val pmp_req_vec     = Wire(Vec(4, Valid(new PMPReqBundle())))
+  val pmp_req_vec     = Wire(Vec(4, Decoupled(new PMPReqBundle())))
   pmp_req_vec(0) <> icache.io.pmp(0).req
   pmp_req_vec(1) <> icache.io.pmp(1).req
   pmp_req_vec(2) <> icache.io.pmp(2).req

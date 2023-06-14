@@ -96,6 +96,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     val lsq = ValidIO(new LsPipelineBundle())
     val dtlbResp = Flipped(DecoupledIO(new TlbResp()))
     val rsFeedback = ValidIO(new RSFeedback)
+    val pmptable_miss = Input(Bool())
   })
 
   // mmio cbo decoder
@@ -115,10 +116,10 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   // Send TLB feedback to store issue queue
   // Store feedback is generated in store_s1, sent to RS in store_s2
   io.rsFeedback.valid := io.in.valid
-  io.rsFeedback.bits.hit := !s1_tlb_miss
+  io.rsFeedback.bits.hit := !(s1_tlb_miss || io.pmptable_miss)
   io.rsFeedback.bits.flushState := io.dtlbResp.bits.ptwBack
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
-  io.rsFeedback.bits.sourceType := RSFeedbackType.tlbMiss
+  io.rsFeedback.bits.sourceType := Mux(s1_tlb_miss , RSFeedbackType.tlbMiss , RSFeedbackType.pmptable_miss)
   XSDebug(io.rsFeedback.valid,
     "S1 Store: tlbHit: %d robIdx: %d\n",
     io.rsFeedback.bits.hit,
@@ -128,7 +129,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
-  io.out.valid := io.in.valid && !s1_tlb_miss
+  io.out.valid := io.in.valid && !s1_tlb_miss && !io.pmptable_miss
   io.out.bits := io.in.bits
   io.out.bits.paddr := s1_paddr
   io.out.bits.miss := false.B
@@ -203,6 +204,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val feedbackSlow = ValidIO(new RSFeedback)
     val tlb = new TlbRequestIO()
     val pmp = Flipped(new PMPRespBundle())
+    val pmptable_miss = Input(Bool())
     val rsIdx = Input(UInt(log2Up(IssQueSize).W))
     val isFirstIssue = Input(Bool())
     val lsq = ValidIO(new LsPipelineBundle)
@@ -229,7 +231,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
-
+  store_s1.io.pmptable_miss := io.pmptable_miss
   store_s1.io.dtlbResp <> io.tlb.resp
   io.lsq <> store_s1.io.lsq
 

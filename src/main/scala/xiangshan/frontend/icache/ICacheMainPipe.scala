@@ -69,7 +69,7 @@ class ICacheMSHRBundle(implicit p: Parameters) extends ICacheBundle{
 }
 
 class ICachePMPBundle(implicit p: Parameters) extends ICacheBundle{
-  val req  = Valid(new PMPReqBundle())
+  val req  = Decoupled(new PMPReqBundle())
   val resp = Input(new PMPRespBundle())
 }
 
