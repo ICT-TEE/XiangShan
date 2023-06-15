@@ -202,6 +202,16 @@ case class XSCoreParameters
     partialStaticPMP = true,
     saveLevel = true
   ),
+  plbParameters: TLBParameters = TLBParameters(
+    name = "plb",
+    useDmode = false,
+    sameCycle = false,
+    missSameCycle = true,
+    normalNWays = 5,
+    normalReplacer = Some("plru"),
+    superNWays = 5,
+    superReplacer = Some("plru"),
+  ),
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",
