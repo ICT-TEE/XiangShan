@@ -26,7 +26,7 @@ import utils.MaskedRegMap.WritableMask
 import xiangshan._
 import xiangshan.backend.fu.util.HasCSRConst
 import utils._
-import xiangshan.cache.mmu.{TlbCmd, TlbExceptionBundle}
+import xiangshan.cache.mmu.{TlbCmd, TlbExceptionBundle, PlbRequestIO}
 
 trait PMPConst extends HasPMParameters {
   val PMPOffBits = 2 // minimal 4bytes
@@ -36,6 +36,13 @@ trait PMPConst extends HasPMParameters {
 abstract class PMPBundle(implicit val p: Parameters) extends Bundle with PMPConst
 abstract class PMPModule(implicit val p: Parameters) extends Module with PMPConst
 abstract class PMPXSModule(implicit p: Parameters) extends XSModule with PMPConst
+
+class PMPPerm(implicit p: Parameters) extends PMPBundle {
+  val c = Bool()
+  val x = Bool()
+  val w = Bool()
+  val r = Bool()
+}
 
 @chiselName
 class PMPConfig(implicit p: Parameters) extends PMPBundle {
@@ -469,7 +476,7 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
   val resp = new PMPRespBundle()
   val miss = Output(Bool())
-  // val flush = Input(Bool())
+  val plb = Flipped(new PlbRequestIO())
 
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
     check_env.apply(mode, pmp, pma)
@@ -526,7 +533,7 @@ class PMPChecker
   require(!(leaveHitMux && sameCycle))
   val io = IO(new PMPCheckIO(lgMaxSize))
 
-  val req = if (EnablePMPTable) DataHoldBypass(io.req.bits, io.req.fire) else io.req.bits
+  val req = if (EnablePMPTable) DataHoldBypass(io.req.bits, io.req.valid) else io.req.bits
 
   val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
   val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
@@ -545,18 +552,11 @@ class PMPChecker
 
   if (EnablePMPTable) {
     require(!(sameCycle && pmpUsed))
-    // miss generate
-    val rand = LFSR64(io.req.fire)(3,0)
-    val cnt  = RegInit(0.U(3.W))
+    
+    io.plb.req.valid := io.req.valid
+    io.plb.req.bits  := req
 
-    when (io.req.fire) {
-      cnt := Mux(rand(3), rand(2,0), 0.U)
-    }.otherwise {
-      cnt := Mux(cnt =/= 0.U, cnt-1.U, cnt)
-    }
-
-    io.miss := Mux(io.req.fire, !(Mux(rand(3), rand(2,0), 0.U) === 0.U), !(cnt === 0.U))
-
+    io.miss := io.plb.miss
     io.resp := Mux(RegNext(io.miss), 15.U(4.W).asTypeOf(new PMPRespBundle), resp) // miss: ret 0b1111
 
     if (!pmpUsed) {
