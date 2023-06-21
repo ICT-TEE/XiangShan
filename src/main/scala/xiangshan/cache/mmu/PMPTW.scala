@@ -46,13 +46,18 @@ class PMPtwRespIO(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
 }
 
 class MemReqIO(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
-  val addr = UInt(44.W)
+  val addr = UInt(56.W)
   val id = UInt(log2Up(MemReqWidth).W)
 }
 
 class MemRespIO(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
   val data = UInt(64.W)
   val id = UInt(log2Up(MemReqWidth).W)
+}
+
+class L2Data(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
+  val data = UInt(32.W)
+  val corrupt = Bool()
 }
 
 class PMPtwIO(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
@@ -105,6 +110,89 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
   pmpt.io.flush := io.sfence.valid || io.csr.satp.changed
 
   // mem
+  // 按道理讲，最简单的就是将mem和pmpt连接起来，其他一概不管
+  val busy = RegInit(false.B) // 当发出Get请求后需要等待响应返回，在响应返回之前不能接收新的Req
+  val counter = RegInit(0.U(1.W))
+  val total_beats = l2tlbParams.blockBytes / 32 - 1
+  val data_last = counter === total_beats
+  val memRead = edge.Get( // 确定请求的类型为Get
+    fromSource = pmpt.io.mem.req.bits.id,
+    toAddress = pmpt.io.mem.req.bits.addr, // 是否存在地址宽度不匹配的问题
+    lgSize = log2Up(l2tlbParams.blockBytes).U
+  ).v2
+  mem.a.bits := memRead
+  mem.a.valid := pmpt.io.mem.req.valid && !pmpt.io.flush
+  mem.d.ready := true.B
+
+  // 这里是两拍的内容，需要进行结合吗？
+  // valid和ready的区别是什么？valid是数据有效可以发送，ready是准备好了可以接收数据
+  val queue = Module(new Queue(new L2Data, 2, flow = true))
+
+  val memData = queue.io.deq.bits.data  // 是将所有的数据都取出来吗？
+
+  pmpt.io.mem.resp.ready :=
+  pmpt.io.mem.resp.bits.data := memData
+
+  // 通过计数将两拍数据连接起来
+  when (mem.d.valid && pmpt.io.mem.resp.ready) {
+    counter := counter + 1.U
+    when (date_last) {
+      counter := 0.U
+      busy := false.B
+    }
+  }
+
+//  def from_missqueue(id: UInt) = {
+//    (id =/= l2tlbParams.llptwsize.U)  // 这个是不是应该要改成关于pmptw的参数了
+//  }
+//  val waiting_resp = RegInit(VecInit(Seq.fill(MemReqWidth)(false.B)))
+//  val flush_latch = RegInit(VecInit(Seq.fill(MemReqWidth)(false.B)))
+//  // mem.a.ready，是否有ptw何llptw需要仲裁输出
+//  val mem_out = Module(DecoupledIO(new L2TlbMemReqBundle()))
+//  mem_out.bits <> pmpt.io.mem.req  // 两个地址的宽度是否相同
+//  mem_out.ready := mem.a.ready && !pmpt.io.flush // 当不需要仲裁还需要ready信号吗，flush有什么作用
+//
+//  // 有限制防止两次读同一地址
+//
+//  // mem read
+//  val memRead = edge.Get( // 确定请求的类型为Get
+//    fromSource = mem_out.bits.id,
+//    toAddress  = blockBytes_align(mem_out.bits.addr),
+//    lgSize     = log2Up(l2tlbParams.blockBytes).U
+//  ).v2
+//  mem.a.bits := memRead
+//  mem.a.valid := mem_out.valid && !pmpt.io.flush
+//  mem.d.ready := true.B
+//  // mem -> data buffer
+//  val refill_data = Reg(Vec(blockBits / l1BusDataWidth, UInt(l1BusDataWidth.W)))
+//  val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire())  //
+//  val mem_resp_done = refill_helper._3  //
+//  val mem_resp_from_mq = from_missqueue(mem.d.bits.source)
+//  when (mem.d.valid) {
+//    assert(mem.d.bits.source <= l2tlbParams.llptwsize.U)
+//    refill_data(refill_helper._4) := mem.d.bits.data  //
+//  }
+//  val refill_data_temp = WireInit(refill_data)
+//  refill_data_temp(refill_helper,_4) := mem.d.bits.data
+//
+////  val resp_pte = VecInit((0 until MemReqWidth).map(i =>
+////    if (i == l2tlbParams.llptwsize) { RegEnable(get_part(refill_data_temp, req_add_low))}
+////  ))
+//
+//  // save only one pte for each id
+//  // mem -> miss queue
+//
+//  // mem -> pmptw
+//  pmpt.io.mem.req.ready := mem.a.ready
+//  pmpt.io.mem.resp.valid := mem_resp_done && !mem_resp_from_mq
+////  pmpt.io.mem.resp.bits := resp_pte.last
+//  // mem -> cache
+//
+//  when (mem_resp_done) {
+//    waiting_resp(mem.d.bits.source) := false.B
+//    flush_latch(mem.d.bits.source) := false.B
+//  }
+
   // TODO
 }
 
@@ -124,8 +212,8 @@ class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst with
     val resp = Valid(new PMPtwRespIO)
     val flush = Input(Bool())
     val mem = new Bundle {
-      val req = Flipped(Valid(new MemReqIO))
-      val resp = Valid(new MemRespIO)
+      val req = Flipped(Valid(new MemReqIO))  // 是否是反的
+      val resp = Valid(new MemRespIO) // Base始终ready?
     }
   })
 
