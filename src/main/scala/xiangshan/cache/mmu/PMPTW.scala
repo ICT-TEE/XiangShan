@@ -46,7 +46,7 @@ class PMPtwRespIO(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
 }
 
 class MemReqIO(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
-  val addr = UInt(56.W)
+  val addr = UInt(PAddrBits.W)
   val id = UInt(log2Up(MemReqWidth).W)
 }
 
@@ -156,67 +156,62 @@ class PMPtwEntry(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
   val sourceIds = UInt(PMPtwWidth.W)
   val rootData = UInt(64.W)
   val level = UInt(1.W)
-  val running = Bool() // valid
 }
 
-class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst with HasCircularQueuePtrHelper {
+class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new PMPtwReqIO))
     val resp = Valid(new PMPtwRespIO)
     val flush = Input(Bool())
     val mem = new Bundle {
-      val req = Valid(new MemReqIO)  // 是否是反的
-      val resp = FLipped(Valid(new MemRespIO)) // Base始终ready?
+      val req = Valid(new MemReqIO)
+      val resp = Flipped(Valid(new MemRespIO))
     }
   })
 
-  class PMPtwPtr(implicit p: Parameters) extends CircularQueuePtr[PMPtwPtr](PMPtwSize) {
-    def flush() = {
-      this.flag := false.B
-      this.value := 0.U
-    }
-  }
-
-  object PMPtwPtr {
-    def apply()(implicit p: Parameters): PMPtwPtr = {
-      val ptr = Wire(new PMPtwPtr)
-      ptr.flag := false.B
-      ptr.value := 0.U
-      ptr
-    }
-  }
-
-  val enqPtr, l1ReqPtr, l1RespPtr, l2ReqPtr, l2RespPtr, deqPtr = RegInit(PMPtwPtr())
   val entries = Reg(Vec(PMPtwSize, new PMPtwEntry()))
+  // waste 3 cycle
+  val s_empty :: s_l1req :: s_l1resp :: s_l2req :: s_l2resp :: s_deq :: Nil = Enum(6);
+  val state = RegInit(VecInit(Seq.fill(PMPtwSize)(s_empty)))
+
+  val empty_vec   = state.map(_ === s_empty)
+  val l1req_vec   = state.map(_ === s_l1req)
+  val l1resp_vec  = state.map(_ === s_l1resp)
+  val l2req_vec   = state.map(_ === s_l2req)
+  val l2resp_vec  = state.map(_ === s_l2resp)
+  val deq_vec     = state.map(_ === s_deq)
+
+  val full = !ParallelOR(empty_vec)
+  val enq_ptr = ParallelPriorityEncoder(empty_vec)
+  val deq_fire = ParallelOR(deq_vec)
+  val deq_ptr = ParallelPriorityEncoder(deq_vec)
+
+  val l1mem_req = ParallelOR(l1req_vec)
+  val l2mem_req = ParallelOR(l2req_vec)
+  val l1req_ptr = ParallelPriorityEncoder(l1req_vec)
+  val l2req_ptr = ParallelPriorityEncoder(l2req_vec)
 
   val resp_data = RegInit(0.U(64.W))
-  val is_pte = WireInit(false.B)
-
-  val l1Req_fire  = enqPtr =/= l1ReqPtr && l2ReqPtr === l1RespPtr
-  val l1Resp_fire = io.mem.resp.bits.id === l1RespPtr.value
-  val l2Req_fire  = l2ReqPtr =/= l1RespPtr
-  val l2Resp_fire = io.mem.resp.bits.id === l2RespPtr.value
-  val deq_fire    = l2RespPtr =/= deqPtr
 
   val tag_eq_vec = entries.indices.map(i =>
-    entries(i).running &&
+    state(i) =/= s_empty && state(i) =/= s_deq &&
     makeTag(io.req.bits.ppn, io.req.bits.offset) ===
     makeTag(entries(i).ppn, entries(i).offset)
-
   )
   val tag_eq = ParallelOR(tag_eq_vec)
   val tag_eq_ptr = ParallelPriorityEncoder(tag_eq_vec)
 
   /* input */
-  io.req.ready := !isFull(enqPtr, deqPtr)
+  io.req.ready := !full
 
   when (io.req.fire()) {
     when (!tag_eq) {
-      entries(enqPtr.value).offset := io.req.bits.offset
-      entries(enqPtr.value).ppn := io.req.bits.ppn
-      entries(enqPtr.value).sourceIds :=
-        setBits(entries(enqPtr.value).sourceIds, io.req.bits.sourceId)
-      entries(enqPtr.value).running := true.B
+      entries(enq_ptr).offset := io.req.bits.offset
+      entries(enq_ptr).ppn := io.req.bits.ppn
+      entries(enq_ptr).sourceIds :=
+        setBits(entries(enq_ptr).sourceIds, io.req.bits.sourceId)
+      entries(enq_ptr).level := 0.U
+      state(enq_ptr) := s_l1req
 
     }.otherwise { // tag equal merge
       entries(tag_eq_ptr).sourceIds :=
@@ -226,55 +221,46 @@ class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst with
 
   /* mem req */
   io.mem.req.valid := false.B
-  when (l2Req_fire && !is_pte) {
+  when (l2mem_req && !isPte(entries(l2req_ptr).rootData)) {
     io.mem.req.valid := true.B
-    io.mem.req.bits.id := l2ReqPtr.value
+    io.mem.req.bits.id := l2req_ptr
     io.mem.req.bits.addr :=
-      makeAddr(1.U, getRootPpn(entries(l2ReqPtr.value).rootData), entries(l2ReqPtr.value).offset)
+      makeAddr(1.U, getRootPpn(entries(l2req_ptr).rootData), entries(l2req_ptr).offset)
+    entries(l2req_ptr).level := 1.U
+    state(l2req_ptr) := s_l2resp
 
-  }.elsewhen (l1Req_fire) {
+  }.elsewhen (l1mem_req) {
     io.mem.req.valid := true.B
-    io.mem.req.bits.id := l1ReqPtr.value
-    io.mem.req.bits.addr := 
-      makeAddr(0.U, entries(l1ReqPtr.value).ppn, entries(l1ReqPtr.value).offset)
+    io.mem.req.bits.id := l1req_ptr
+    io.mem.req.bits.addr :=
+      makeAddr(0.U, entries(l1req_ptr).ppn, entries(l1req_ptr).offset)
+    state(l1req_ptr) := s_l1resp
   }
 
   /* mem resp */
-  when (l1Resp_fire) {
-    entries(l1RespPtr.value).rootData := io.mem.resp.bits.data
+  when (io.mem.resp.valid) {
+    val resp_state = state(io.mem.resp.bits.id)
+    when (resp_state === s_l1resp) {
+      entries(io.mem.resp.bits.id).rootData := io.mem.resp.bits.data
+      resp_state := Mux(isPte(io.mem.resp.bits.data), s_deq, s_l2req)
 
-  }.elsewhen (l2Resp_fire) {
-    resp_data := io.mem.resp.bits.data
+    }.elsewhen (resp_state === s_l2resp) {
+      resp_data := io.mem.resp.bits.data
+      resp_state := s_deq
+    }
   }
 
   /* resp */
   io.resp.valid := false.B
   when (deq_fire) {
     io.resp.valid := true.B
-    io.resp.bits.level := entries(deqPtr.value).level
-    io.resp.bits.offset := entries(deqPtr.value).offset
-    io.resp.bits.ppn := entries(deqPtr.value).ppn
-    io.resp.bits.sourceIds := entries(deqPtr.value).sourceIds
+    io.resp.bits.level := entries(deq_ptr).level
+    io.resp.bits.offset := entries(deq_ptr).offset
+    io.resp.bits.ppn := entries(deq_ptr).ppn
+    io.resp.bits.sourceIds := entries(deq_ptr).sourceIds
     io.resp.bits.data := Mux(
-      io.resp.bits.level === 1.U ,resp_data, entries(deqPtr.value).rootData)
-    entries(enqPtr.value).running := false.B
+      entries(deq_ptr).level === 1.U, resp_data, entries(deq_ptr).rootData)
   }
-
-  /* pte */
-  // for l2Req_fire
-  is_pte := isPte(entries(l2ReqPtr.value).rootData)
-  when (l2Req_fire && !is_pte) {
-    entries(l2ReqPtr.value).level := 1.U
-  }
-
-  /* update ptr */
-  enqPtr := Mux(io.req.fire && !tag_eq, enqPtr + 1.U, enqPtr)
-  deqPtr := Mux(deq_fire, deqPtr + 1.U, deqPtr)
-
-  l1ReqPtr  := Mux(l1Req_fire, l1ReqPtr + 1.U, l1ReqPtr)
-  l1RespPtr := Mux(l1Resp_fire, l1RespPtr + 1.U, l1RespPtr)
-  l2ReqPtr  := Mux(l2Req_fire, l2ReqPtr + 1.U, l2ReqPtr)
-  l2RespPtr := Mux(l2Resp_fire, l2RespPtr + 1.U, l2RespPtr)
 
   /* flush */
   when (io.flush) {
@@ -282,12 +268,7 @@ class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst with
     io.req.ready := false.B
     io.resp.valid := false.B
 
-    enqPtr.flush()
-    l1ReqPtr.flush()
-    l1RespPtr.flush()
-    l2ReqPtr.flush()
-    l2RespPtr.flush()
-    deqPtr.flush()
+    state.map(_ := s_empty)
   }
 
   /* funtion */
@@ -300,7 +281,8 @@ class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst with
   }
 
   def makeAddr(level: UInt, ppn: UInt, offset: UInt) = {
-    Cat(ppn, Mux(level.asBool, offset(24, 16), offset(33, 25)), 0.U(3.W))
+    val paddr = Cat(ppn, Mux(level.asBool, offset(24, 16), offset(33, 25)), 0.U(3.W))
+    paddr(PAddrBits-1, 0)
   }
 
   def makeTag(ppn: UInt, offset: UInt) = {
