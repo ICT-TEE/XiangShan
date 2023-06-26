@@ -56,7 +56,8 @@ class MemRespIO(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
 }
 
 class L2Data(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
-  val data = UInt(256.W)
+  val data = UInt((32 * 8).W)
+  val beat = UInt(2.W)
   val corrupt = Bool()
 }
 
@@ -111,10 +112,22 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
 
   // mem
   // 按道理讲，最简单的就是将mem和pmpt连接起来，其他一概不管
+  // 在HuanCun的SinkA中接收a请求是有ready信号的
+  def get_part(data: Vec[UInt], index: UInt): UInt = {
+    val inner_data = data.asTypeOf(Vec(data.getWidth / XLEN, UInt(XLEN.W)))
+    inner_data(index)
+  }
+  def addr_low_from_paddr(paddr: UInt) = {
+    paddr(log2Up(l2tlbParams.blockBytes) - 1, log2Up(XLEN / 8))
+  }
   val busy = RegInit(false.B) // 当发出Get请求后需要等待响应返回，在响应返回之前不能接收新的Req
   val counter = RegInit(0.U(1.W))
   val total_beats = l2tlbParams.blockBytes / 32 - 1
   val data_last = counter === total_beats
+  val dataBuffer = Reg(Vec(2, UInt((32 * 8).W)))
+  when (pmpt_arb.io.out.fire()) {
+    req_addr_low(pmpt.io.mem.resp.bits.id) := addr_low_from_paddr(pmpt.io.mem.resp.bits.addr)
+  }
   val memRead = edge.Get( // 确定请求的类型为Get
     fromSource = pmpt.io.mem.req.bits.id,
     toAddress = pmpt.io.mem.req.bits.addr, // 是否存在地址宽度不匹配的问题
@@ -123,12 +136,25 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
   mem.a.bits := memRead
   mem.a.valid := pmpt.io.mem.req.valid && !pmpt.io.flush
   mem.d.ready := true.B
+  // mem -> data buffer
+  val refill_data = Reg(Vec(2, UInt((32 * 8).W)))
+  val req_addr_low = Reg(Vec(MemReqWidth, UInt(log2Up(l2tlbParams.blockBytes) - log2Up(XLEN / 8)).W))
+  val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire())
+  val mem_resp_done = refill_helper._3
+  when (mem.d.valid) {
+    refill_data(refill_helper._4) := mem.d.bits.data
+  }
 
+  val resp_pte = VecInit(0 Until l2tlbParams.llptwsize).map(i =>
+  RegEnable(get_part(refill_data, req_addr_low(i)), mem_resp_done))
+
+  pmpt.io.mem.resp.bits := resp_pte.last
   when (mem.a.fire()) {
     busy := true.B
   }
 
   // 这里是两拍的内容，需要进行结合吗？
+  // 可以借鉴SourceA的处理
   // valid和ready的区别是什么？valid是数据有效可以发送，ready是准备好了可以接收数据
 //  val queue = Module(new Queue(new L2Data, 2, flow = true))
 
@@ -137,12 +163,13 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
 
 //  pmpt.io.mem.resp.ready 没有这个信号
 //  pmpt.io.mem.resp.bits.data := memData
-  // TODO:使用一个向量存储两个Beat的数据
+  // TODO:使用一个向量存储两个Beat的数据，并且要分为从L2存数据和取数据到PMPTW
 
   // 通过计数将两拍数据连接起来
   when (mem.d.fire()) {
     counter := counter + 1.U
     when (data_last) {
+      // 将数据合并在一起并且使用mask取出有效的部分
       counter := 0.U
       busy := false.B
     }
