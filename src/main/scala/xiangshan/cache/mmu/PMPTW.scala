@@ -72,7 +72,7 @@ class PMPtwIO(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
   val csr = Input(new TlbCsrBundle)
 }
 
-class PMPTW(val parentName:String = "Unknown")(implicit p: Parameters) extends LazyModule with HasPMPtwConst {
+class PMPTW()(implicit p: Parameters) extends LazyModule with HasPMPtwConst {
 
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
