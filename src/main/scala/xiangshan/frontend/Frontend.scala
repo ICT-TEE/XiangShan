@@ -58,6 +58,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
         val bpWrong = Output(UInt(XLEN.W))
       }
     }
+    val pmptw = new PlbPtwIO
   })
 
   //decouped-frontend modules
@@ -140,6 +141,14 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
     shouldBlock = true,
     itlbParams
   )
+
+  val plb = Module(new PLB(pmp_check.length, 5, 4))
+  for (i <- pmp_check.indices) {
+    pmp_check(i).plb <> plb.io.requestor(i)
+  }
+  io.pmptw <> plb.io.ptw
+  plb.io.csr <> DelayN(io.tlbCsr, 1)
+  plb.io.sfence <> DelayN(io.sfence, 1)
 
   icache.io.prefetch <> ftq.io.toPrefetch
 

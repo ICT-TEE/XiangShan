@@ -141,10 +141,13 @@ abstract class XSCoreBase(val parentName:String = "Unknown")(implicit p: config.
   // outer facing nodes
   val frontend = LazyModule(new Frontend(parentName = parentName + "frontend_"))
   val ptw = LazyModule(new PTWWrapper(parentName = parentName + "ptw_"))
+  val pmptw = LazyModule(new PMPTW(parentName = parentName + "pmptw_"))
   val ptw_to_l2_buffer = LazyModule(new TLBuffer)
+  val pmptw_to_l2_buffer = LazyModule(new TLBuffer)
   val csrOut = BundleBridgeSource(Some(() => new DistributedCSRIO()))
 
   ptw_to_l2_buffer.node := ptw.node
+  pmptw_to_l2_buffer.node := pmptw.node
 
   val wbArbiter = LazyModule(new WbArbiterWrapper(exuConfigs, NRIntWritePorts, NRFpWritePorts))
   val intWbPorts = wbArbiter.intWbPorts
@@ -260,7 +263,9 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val wb2Ctrl = outer.wb2Ctrl.module
   val memBlock = outer.memBlock.module
   val ptw = outer.ptw.module
+  val pmptw = outer.pmptw.module
   val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
+  val pmptw_to_l2_buffer = outer.pmptw_to_l2_buffer.module
   val exuBlocks = outer.exuBlocks.map(_.module)
 
   frontend.io.hartId  := io.hartId
@@ -426,6 +431,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ptw.io.csr.distribute_csr <> csrioIn.customCtrl.distribute_csr
   ptw.io.csr.prefercache <> csrioIn.customCtrl.ptw_prefercache_enable
 
+  // pmptable
+  pmptw.io.req(0) <> frontend.io.pmptw.req
+  pmptw.io.resp(0) <> frontend.io.pmptw.resp
+
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
 
@@ -451,8 +460,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
       ResetGenNode(Seq(
         ModuleNode(itlbRepeater2),
         ModuleNode(ptw),
+        ModuleNode(pmptw),
         ModuleNode(dtlbRepeater2),
         ModuleNode(ptw_to_l2_buffer),
+        ModuleNode(pmptw_to_l2_buffer),
       )),
       ResetGenNode(Seq(
         ModuleNode(exuBlocks.head),
