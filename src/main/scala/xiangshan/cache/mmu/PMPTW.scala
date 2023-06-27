@@ -19,6 +19,7 @@ package xiangshan.cache.mmu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.internal.naming.chiselName
 import xiangshan._
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
@@ -74,7 +75,7 @@ class PMPTW(val parentName:String = "Unknown")(implicit p: Parameters) extends L
 
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
-      "ptw",
+      "pmptw",
       sourceId = IdRange(0, MemReqWidth)
     )),
     // requestFields = Seq(PreferCacheField())
@@ -83,7 +84,7 @@ class PMPTW(val parentName:String = "Unknown")(implicit p: Parameters) extends L
   lazy val module = new PMPTWImp(this)
 }
 
-// @chiselName
+@chiselName
 class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer)
   with HasXSParameter with HasPMPtwConst { //with HasPerfEvents {
   val (mem, edge) = outer.node.out.head
@@ -123,7 +124,7 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
   }
 
   // 取发送到L2的请求信息作为从L2取回数据的“mask”
-  val req_addr_low = Reg(Vec(MemReqWidth, UInt(log2Up(BlockBytes) - log2Up(XLEN / 8)).W))
+  val req_addr_low = RegInit(VecInit(Seq.fill(MemReqWidth)(0.U((log2Up(BlockBytes) - log2Up(XLEN / 8)).W))))
   when (pmpt.io.mem.req.valid) {
     req_addr_low(pmpt.io.mem.req.bits.id) := addr_low_from_paddr(pmpt.io.mem.req.bits.id)
   }
@@ -132,7 +133,7 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
     fromSource = pmpt.io.mem.req.bits.id,
     toAddress = pmpt.io.mem.req.bits.addr, // 是否存在地址宽度不匹配的问题
     lgSize = log2Up(BlockBytes).U
-  ).v2
+  )._2
   mem.a.bits := memRead
   mem.a.valid := pmpt.io.mem.req.valid && !pmpt.io.flush
   mem.d.ready := true.B
