@@ -65,6 +65,7 @@ class PMPConfig(implicit p: Parameters) extends PMPBundle {
   def locked = l
   def addr_locked: Bool = locked
   def addr_locked(next: PMPConfig): Bool = locked || (next.locked && next.tor)
+  def t = atomic  // use by pmptable
 }
 
 object PMPConfigUInt {
@@ -413,6 +414,15 @@ trait PMPCheckMethod extends PMPConst {
     resp
   }
 
+  def pmp_check(cmd: UInt, perm: PMPPerm) = {
+    val resp = Wire(new PMPRespBundle)
+    resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !perm.r
+    resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && !perm.w
+    resp.instr := TlbCmd.isExec(cmd) && !perm.x
+    resp.mmio := false.B
+    resp
+  }
+
   def pmp_match_res(leaveHitMux: Boolean = false, valid: Bool = true.B)(
     addr: UInt,
     size: UInt,
@@ -451,11 +461,11 @@ trait PMPCheckMethod extends PMPConst {
     match_vec(num) := true.B
     cfg_vec(num) := pmpDefault
 
-    if (leaveHitMux) {
+    (if (leaveHitMux) {
       ParallelPriorityMux(match_vec.map(RegEnable(_, init = false.B, valid)), RegEnable(cfg_vec, valid))
     } else {
       ParallelPriorityMux(match_vec, cfg_vec)
-    }
+    }, ParallelPriorityEncoder(match_vec))
   }
 }
 
@@ -476,7 +486,7 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
   val resp = new PMPRespBundle()
   val miss = Output(Bool())
-  //val plb = Flipped(new PlbRequestIO())
+  val plb = Flipped(new PlbRequestIO())
 
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
     check_env.apply(mode, pmp, pma)
@@ -535,7 +545,7 @@ class PMPChecker
 
   val req = if (EnablePMPTable) DataHoldBypass(io.req.bits, io.req.valid) else io.req.bits
 
-  val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
+  val (res_pmp, pmp_match_idx) = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
   val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
 
   val resp_pmp = pmp_check(req.cmd, res_pmp.cfg)
@@ -550,18 +560,30 @@ class PMPChecker
     io.resp := RegEnable(resp, io.req.valid)
   }
 
-  if (EnablePMPTable) {
+  if (EnablePMPTable && pmpUsed) {
     require(!(sameCycle && pmpUsed))
-    
-    //io.plb.req.valid := io.req.valid
-    //io.plb.req.bits  := req
 
-    //io.miss := io.plb.miss
-    io.resp := Mux(RegNext(io.miss), 15.U(4.W).asTypeOf(new PMPRespBundle), resp) // miss: ret 0b1111
+    io.plb.req.valid := false.B
+    io.miss := false.B
+    io.resp := RegEnable(resp, io.req.valid)
 
-    if (!pmpUsed) {
-      io.miss := false.B
+    // hit pmptable
+    when (res_pmp.cfg.t && pmp_match_idx < 15.U) {
+      io.plb.req.valid := true.B
+      io.plb.req.bits.offset := req.addr - Mux(
+        res_pmp.cfg.tor,
+        Mux(pmp_match_idx === 0.U, 0.U, io.check_env.pmp(pmp_match_idx - 1.U).addr << 2.U),
+        getBaseAddr(res_pmp.addr, res_pmp.mask))
+      io.plb.req.bits.patp := io.check_env.pmp(pmp_match_idx + 1.U).addr << 2.U
+
+      io.miss := io.plb.miss
+      io.resp := resp_pma | pmp_check(req.cmd, io.plb.resp)
     }
+  }
+
+  def getBaseAddr(cfgAddr: UInt, cfgMask: UInt): UInt = {
+    val base = cfgAddr & ~(cfgMask >> 3.U)
+    Cat(base >> 10.U, 0.U(12.W))
   }
 }
 
@@ -581,7 +603,7 @@ class PMPCheckerv2
 
   val req = io.req.bits
 
-  val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
+  val (res_pmp, _) = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
   val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
 
   val resp = and(res_pmp, res_pma)
