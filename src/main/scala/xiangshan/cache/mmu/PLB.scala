@@ -21,39 +21,19 @@ class PlbRequestIO(implicit p: Parameters) extends TlbBundle {
 }
 
 class PlbPtwIO(implicit p: Parameters) extends TlbBundle {
-  val req = DecoupledIO(new Bundle {
-    val offset = UInt(34.W)
-    val ppn = UInt(44.W)
-    //val l1Hit = Bool()
-  })
-  val resp = Flipped(DecoupledIO(new Bundle {
-    val offset = UInt(34.W)
-    val ppn = UInt(44.W)
-    val level = UInt(1.W)
-    val data = UInt(XLEN.W)
-    val asid = UInt(asidLen.W)
-
-    def refill_hit(offset: UInt, ppn: UInt, asid: UInt, ignoreAsid: Boolean = false): Bool = {
-      val asid_hit = if (ignoreAsid) true.B else (this.asid === asid)
-      val tag_ppn_match = this.ppn === ppn
-      val tag_offset_match_hi = this.offset(33, 25) === offset(33, 25)
-      val tag_offset_match_lo = this.offset(24, 16) === offset(24, 16)
-      val tag_match = tag_offset_match_hi && (!this.level.asBool() || tag_offset_match_lo)
-      asid_hit && tag_match && tag_ppn_match
-    }
-  }))
-
-
+  val req = DecoupledIO(new PMPtwReqIO)
+  val resp = Flipped(DecoupledIO(new PMPtwRespIO))
 }
+
 class PlbReplaceAccessBundle(nSets: Int, nWays: Int)(implicit p: Parameters) extends TlbBundle {
   val sets = Output(UInt(log2Up(nSets).W))
   val touch_ways = ValidIO(Output(UInt(log2Up(nWays).W)))
 }
 
-class PlbIO(Width: Int, q: TLBParameters)(implicit p: Parameters)  extends MMUIOBaseBundle {
+class PlbIO(Width: Int, EntrySize: Int)(implicit p: Parameters)  extends MMUIOBaseBundle {
   val requestor = Vec(Width, new PlbRequestIO)
   val ptw = new PlbPtwIO
-  val access = Vec(Width, new PlbReplaceAccessBundle(1, 8))
+  val access = Vec(Width, new PlbReplaceAccessBundle(1, EntrySize))
 }
 
 class RespBundle(implicit p: Parameters) extends TlbBundle {
@@ -92,8 +72,8 @@ class PlbEntry(implicit p: Parameters) extends TlbBundle {
   resp
   }
 }
-class PLB (Width: Int = 4, Size: Int = 5, q: TLBParameters)(implicit p: Parameters) extends TlbModule {
-  val io = IO(new PlbIO(Width, q))
+class PLB (Width: Int = 4, EntrySize: Int = 8, FilterSize: Int = 5)(implicit p: Parameters) extends TlbModule {
+  val io = IO(new PlbIO(Width, EntrySize))
   val req = io.requestor.map(_.req)
   val miss = io.requestor.map(_.miss)
   val resp = io.requestor.map(_.resp)
@@ -102,11 +82,10 @@ class PLB (Width: Int = 4, Size: Int = 5, q: TLBParameters)(implicit p: Paramete
   val csr_dup = Seq.fill(Width)(RegNext(io.csr))
   val satp = csr_dup.head.satp
 
+  io.ptw.req.bits.sourceId := 0.U
 
-
-  val v = RegInit(VecInit(Seq.fill(8)(false.B)))
-  val entries = Reg(Vec(8 , new PlbEntry))
-
+  val v = RegInit(VecInit(Seq.fill(EntrySize)(false.B)))
+  val entries = Reg(Vec(EntrySize , new PlbEntry))
   val respvalid = RegInit(VecInit(Seq.fill(Width)(false.B)))
 
   //read
@@ -116,7 +95,7 @@ class PLB (Width: Int = 4, Size: Int = 5, q: TLBParameters)(implicit p: Paramete
     //val resp_miss = miss(i)
     //val resp_data = resp(i)
     val access = io.access(i)
-    val refill_mask = Mux(refill_valid, UIntToOH(refill_idx), 0.U(8.W))
+    val refill_mask = Mux(refill_valid, UIntToOH(refill_idx), 0.U(EntrySize.W))
 
     //val hitvec = VecInit((entries.zipWithIndex).zip (v zip refill_mask.asBools).map{case (e, m) => e._1.hit(offset, ppn, asid, true) && m._1 && !m._2})
     val hitvec = VecInit((entries.zipWithIndex).zip (v).map{case (e, m) => e._1.hit(offset, ppn, io.csr.satp.asid, true) && m })
@@ -150,29 +129,29 @@ val sfence = io.sfence
   val filter_ptwreq = Wire(Vec(Width, ptwreq.req))
 
   for (i <- 0 until Width) {
-    filter_ptwreq(i).valid := RegNext(miss(i), init = false.B) && !RegNext(refill_valid, init = false.B)
+    filter_ptwreq(i).valid := RegNext(miss(i) && req(i).valid, init = false.B) && !RegNext(refill_valid, init = false.B)
     filter_ptwreq(i).bits.offset := RegNext(req(i).bits.offset)
     filter_ptwreq(i).bits.ppn := RegNext(req(i).bits.patp(43, 0))
   }
 
-  //val Size = 5
-  //val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
-  val filter_v = RegInit(VecInit(Seq.fill(Size)(false.B)))
-  val ports = Reg(Vec(Size, Vec(Width, Bool()))) // record which port(s) the entry come from, may not able to cover all the ports
-  val filter_offset = Reg(Vec(Size, UInt(34.W)))
-  val filter_ppn = Reg(Vec(Size, UInt(44.W)))
-  val enqPtr = RegInit(0.U(log2Up(Size).W)) // Enq
-  val issPtr = RegInit(0.U(log2Up(Size).W)) // Iss to Ptw
-  val deqPtr = RegInit(0.U(log2Up(Size).W)) // Deq
+  //val FilterSize = 5
+  //val v = RegInit(VecInit(Seq.fill(FilterSize)(false.B)))
+  val filter_v = RegInit(VecInit(Seq.fill(FilterSize)(false.B)))
+  val ports = Reg(Vec(FilterSize, Vec(Width, Bool()))) // record which port(s) the entry come from, may not able to cover all the ports
+  val filter_offset = Reg(Vec(FilterSize, UInt(34.W)))
+  val filter_ppn = Reg(Vec(FilterSize, UInt(44.W)))
+  val enqPtr = RegInit(0.U(log2Up(FilterSize).W)) // Enq
+  val issPtr = RegInit(0.U(log2Up(FilterSize).W)) // Iss to Ptw
+  val deqPtr = RegInit(0.U(log2Up(FilterSize).W)) // Deq
   val mayFullDeq = RegInit(false.B)
   val mayFullIss = RegInit(false.B)
-  val counter = RegInit(0.U(log2Up(Size + 1).W))
+  val counter = RegInit(0.U(log2Up(FilterSize + 1).W))
   val flush = DelayN(io.sfence.valid || io.csr.satp.changed, 2) //todo
   //val tlb_req = WireInit(io.tlb.req)
   val plb_req = WireInit(filter_ptwreq)
 
-  val inflight_counter = RegInit(0.U(log2Up(Size + 1).W))
-  val inflight_full = inflight_counter === Size.U
+  val inflight_counter = RegInit(0.U(log2Up(FilterSize + 1).W))
+  val inflight_full = inflight_counter === FilterSize.U
   when(io.ptw.req.fire() =/= io.ptw.resp.fire()) {
     inflight_counter := Mux(io.ptw.req.fire(), inflight_counter + 1.U, inflight_counter - 1.U)
   }
@@ -237,7 +216,7 @@ val sfence = io.sfence
   val enqPtrVecInit = VecInit((0 until Width).map(i => enqPtr + i.U))
   val enqPtrVec = VecInit((0 until Width).map(i => enqPtrVecInit(accumEnqNum(i))))
   val enqNum = PopCount(reqs.map(_.valid))
-  val canEnqueue = counter +& enqNum <= Size.U
+  val canEnqueue = counter +& enqNum <= FilterSize.U
   // tlb req flushed by ptw resp: last ptw resp && current ptw resp
   // the flushed tlb req will fakely enq, with a false valid
   val plb_req_flushed = reqs.map(a => io.ptw.resp.valid && io.ptw.resp.bits.refill_hit(a.bits.offset, a.bits.ppn, 0.U, true))
@@ -300,14 +279,14 @@ val sfence = io.sfence
   }
 
   counter := counter - do_deq + Mux(do_enq, enqNum, 0.U)
-  assert(counter <= Size.U, "counter should be no more than Size")
-  assert(inflight_counter <= Size.U, "inflight should be no more than Size")
+  assert(counter <= FilterSize.U, "counter should be no more than FilterSize")
+  assert(inflight_counter <= FilterSize.U, "inflight should be no more than FilterSize")
   when(counter === 0.U) {
     assert(!io.ptw.req.fire(), "when counter is 0, should not req")
     assert(isEmptyDeq && isEmptyIss, "when counter is 0, should be empty")
   }
-  when(counter === Size.U) {
-    assert(mayFullDeq, "when counter is Size, should be full")
+  when(counter === FilterSize.U) {
+    assert(mayFullDeq, "when counter is FilterSize, should be full")
   }
 
   when(flush) {
@@ -324,7 +303,7 @@ val sfence = io.sfence
 
   //refill
   val refill_valid = ptwResp_valid && !sfence_dup.head.valid && !satp.changed
-  val re = ReplacementPolicy.fromString("plru", 8)
+  val re = ReplacementPolicy.fromString("plru", EntrySize)
   re.access(io.access.map(_.touch_ways))
   val refill_idx = re.way
 
@@ -347,17 +326,15 @@ val sfence = io.sfence
       access.touch_ways.bits := refill_wayIdx_reg
     }
   }
-  /*
-  val cnt = Vec(Width, RegInit(0.U(3.W)))
-  for (i <- 0 until Width) {
-    val rand = Vec(Width, LFSR64(req(i).fire)(3, 0))
-    when(req(i).fire) {
-      cnt(i) := Mux(rand(i)(3), rand(i)(2, 0), 0.U)
-    }.otherwise {
-      cnt(i) := Mux(cnt(i) =/= 0.U, cnt(i) - 1.U, cnt(i))
-    }
-    miss(i) := Mux(req(i).fire, !(Mux(rand(i)(3), rand(i)(2, 0), 0.U) === 0.U), !(cnt(i) === 0.U))
-  }
 
-   */
+  implicit class RespIO(resp: PMPtwRespIO) {
+    def refill_hit(offset: UInt, ppn: UInt, asid: UInt, ignoreAsid: Boolean = false): Bool = {
+      val asid_hit = if (ignoreAsid) true.B else (resp.asid === asid)
+      val tag_ppn_match = resp.ppn === ppn
+      val tag_offset_match_hi = resp.offset(33, 25) === offset(33, 25)
+      val tag_offset_match_lo = resp.offset(24, 16) === offset(24, 16)
+      val tag_match = tag_offset_match_hi && (!resp.level.asBool() || tag_offset_match_lo)
+      asid_hit && tag_match && tag_ppn_match
+    }
+  }
 }

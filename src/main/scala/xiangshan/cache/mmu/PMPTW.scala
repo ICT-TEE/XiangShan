@@ -45,6 +45,7 @@ class PMPtwRespIO(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
   val ppn = UInt(44.W)
   val level = UInt(1.W)
   val data = UInt(64.W)
+  val asid = UInt(asidLen.W)
   val sourceIds = UInt(PMPtwWidth.W) // use index distinguish source
 }
 
