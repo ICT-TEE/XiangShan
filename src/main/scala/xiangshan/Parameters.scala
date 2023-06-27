@@ -190,7 +190,7 @@ case class XSCoreParameters
     superNWays = 16,
     normalAsVictim = true,
     outReplace = false,
-    partialStaticPMP = true,
+    //partialStaticPMP = true,
     saveLevel = true
   ),
   sttlbParameters: TLBParameters = TLBParameters(
@@ -202,18 +202,8 @@ case class XSCoreParameters
     superNWays = 16,
     normalAsVictim = true,
     outReplace = false,
-    partialStaticPMP = true,
+    //partialStaticPMP = true,
     saveLevel = true
-  ),
-  plbParameters: TLBParameters = TLBParameters(
-    name = "plb",
-    useDmode = false,
-    sameCycle = false,
-    missSameCycle = true,
-    normalNWays = 5,
-    normalReplacer = Some("plru"),
-    superNWays = 5,
-    superReplacer = Some("plru"),
   ),
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(

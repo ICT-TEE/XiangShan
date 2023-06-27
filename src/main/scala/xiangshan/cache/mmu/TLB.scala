@@ -144,7 +144,7 @@ class TLB(Width: Int, nRespDups: Int = 1, q: TLBParameters)(implicit p: Paramete
     // static: 4K pages (or sram entries) -> check pmp with pre-checked results
     val pmp_paddr = Mux(vmEnable_dup(i), Cat(super_ppn(0), offReg), if (!q.sameCycle) RegNext(vaddr) else vaddr)
     pmp(i).valid := resp(i).valid
-    pmp(i).bits.addr := pmp_paddr
+    pmp(i).bits.addr := resp(i).bits.paddr(0)
     pmp(i).bits.size := sizeReg
     pmp(i).bits.cmd := cmdReg
 
