@@ -133,6 +133,13 @@ class XSTile(val parentName:String = "Unknown")(implicit p: Parameters) extends 
     buffers
   } else Seq()
 
+  // pmptw
+  val (pmptw_to_l2_buffers, pmptw_to_l2_buf_node) = chainBuffer(5, "pmptw_to_l2_buffer")
+  misc.busPMU :=
+    TLLogger(s"L2_PMPTW_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
+    pmptw_to_l2_buf_node :=
+    core.pmptw_to_l2_buffer.node
+
   l2cache match {
     case Some(l2) =>
       misc.l2_binder.get :*= l2.node :*= TLBuffer() :*= TLBuffer() :*= misc.l1_xbar
@@ -262,6 +269,7 @@ class XSTileImp(outer: XSTile) extends LazyHardenModuleImp(outer) {
     Seq(outer.misc.module, outer.core.module) ++
       outer.l1i_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
       outer.ptw_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
+      outer.pmptw_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
       outer.l1d_to_l2_bufferOpt.map(_.module) ++
       outer.l2cache.map(_.module)
   )
