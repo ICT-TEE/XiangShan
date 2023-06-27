@@ -131,6 +131,13 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     buffers
   } else Seq()
 
+  // pmptw
+  val (pmptw_to_l2_buffers, pmptw_to_l2_buf_node) = chainBuffer(5, "pmptw_to_l2_buffer")
+  misc.busPMU :=
+    TLLogger(s"L2_PMPTW_${coreParams.HartId}", !debugOpts.FPGAPlatform) :=
+    pmptw_to_l2_buf_node :=
+    core.pmptw_to_l2_buffer.node
+
   l2cache match {
     case Some(l2) =>
       misc.l2_binder.get :*= l2.node :*= TLBuffer() :*= TLBuffer() :*= misc.l1_xbar
@@ -181,6 +188,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       Seq(misc.module, core.module) ++
         l1i_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
         ptw_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
+        pmptw_to_l2_buffers.map(_.module.asInstanceOf[MultiIOModule]) ++
         l1d_to_l2_bufferOpt.map(_.module) ++
         l2cache.map(_.module)
     )
