@@ -29,6 +29,8 @@ trait HasPMPtwConst {
 
   val PMPtwSize = 6
   val MemReqWidth = PMPtwSize
+
+  val BlockBytes = 64
 }
 
 class PMPtwReqIO(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
@@ -117,19 +119,19 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
     inner_data(index)
   }
   def addr_low_from_paddr(paddr: UInt) = {
-    paddr(log2Up(l2tlbParams.blockBytes) - 1, log2Up(XLEN / 8))
+    paddr(log2Up(BlockBytes) - 1, log2Up(XLEN / 8))
   }
 
   // 取发送到L2的请求信息作为从L2取回数据的“mask”
-  val req_addr_low = Reg(Vec(MemReqWidth, UInt(log2Up(l2tlbParams.blockBytes) - log2Up(XLEN / 8)).W))
-  when (pmpt.io.mem.req.fire()) {
+  val req_addr_low = Reg(Vec(MemReqWidth, UInt(log2Up(BlockBytes) - log2Up(XLEN / 8)).W))
+  when (pmpt.io.mem.req.valid) {
     req_addr_low(pmpt.io.mem.req.bits.id) := addr_low_from_paddr(pmpt.io.mem.req.bits.id)
   }
   // 将id、addr、size封装到Get请求中并发送到A通道
   val memRead = edge.Get( // 确定请求的类型为Get
     fromSource = pmpt.io.mem.req.bits.id,
     toAddress = pmpt.io.mem.req.bits.addr, // 是否存在地址宽度不匹配的问题
-    lgSize = log2Up(l2tlbParams.blockBytes).U
+    lgSize = log2Up(BlockBytes).U
   ).v2
   mem.a.bits := memRead
   mem.a.valid := pmpt.io.mem.req.valid && !pmpt.io.flush
@@ -140,13 +142,13 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
   val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire())
   val mem_resp_done = refill_helper._3
   when (mem.d.valid) {
-    assert(mem.d.bits.source <= l2tlbParams.llptwsize.U)  // 不知道有什么用
+    assert(mem.d.bits.source <= PMPtwSize.U)  // 不知道有什么用
     refill_data(refill_helper._4) := mem.d.bits.data
   }
 
-  val resp_pte = RegEnable(get_part(refill_data, req_addr_low(i)), mem_resp_done)
-  pmpt.io.mem.resp.bits := resp_pte
-  // TODO
+  pmpt.io.mem.resp.valid := mem_resp_done
+  val resp_back = get_part(refill_data, req_addr_low(mem.d.bits.source))
+  pmpt.io.mem.resp.bits := resp_back
 }
 
 // real PMPTW logic
