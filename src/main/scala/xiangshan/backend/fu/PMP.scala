@@ -476,7 +476,7 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
   val resp = new PMPRespBundle()
   val miss = Output(Bool())
-  val plb = Flipped(new PlbRequestIO())
+  //val plb = Flipped(new PlbRequestIO())
 
   def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
     check_env.apply(mode, pmp, pma)
@@ -553,10 +553,10 @@ class PMPChecker
   if (EnablePMPTable) {
     require(!(sameCycle && pmpUsed))
     
-    io.plb.req.valid := io.req.valid
-    io.plb.req.bits  := req
+    //io.plb.req.valid := io.req.valid
+    //io.plb.req.bits  := req
 
-    io.miss := io.plb.miss
+    //io.miss := io.plb.miss
     io.resp := Mux(RegNext(io.miss), 15.U(4.W).asTypeOf(new PMPRespBundle), resp) // miss: ret 0b1111
 
     if (!pmpUsed) {
