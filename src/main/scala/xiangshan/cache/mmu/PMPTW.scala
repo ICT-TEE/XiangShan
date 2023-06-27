@@ -19,6 +19,7 @@ package xiangshan.cache.mmu
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
+import chisel3.internal.naming.chiselName
 import xiangshan._
 import utils._
 import freechips.rocketchip.diplomacy.{IdRange, LazyModule, LazyModuleImp}
@@ -29,6 +30,8 @@ trait HasPMPtwConst {
 
   val PMPtwSize = 6
   val MemReqWidth = PMPtwSize
+
+  val BlockBytes = 64
 }
 
 class PMPtwReqIO(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
@@ -55,6 +58,12 @@ class MemRespIO(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
   val id = UInt(log2Up(MemReqWidth).W)
 }
 
+class L2Data(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
+  val data = UInt((32 * 8).W)
+  val beat = UInt(2.W)
+  val corrupt = Bool()
+}
+
 class PMPtwIO(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
   val req = Vec(PMPtwWidth, Flipped(DecoupledIO(new PMPtwReqIO)))
   val resp = Vec(PMPtwWidth, Valid(new PMPtwRespIO))
@@ -66,7 +75,7 @@ class PMPTW(val parentName:String = "Unknown")(implicit p: Parameters) extends L
 
   val node = TLClientNode(Seq(TLMasterPortParameters.v1(
     clients = Seq(TLMasterParameters.v1(
-      "ptw",
+      "pmptw",
       sourceId = IdRange(0, MemReqWidth)
     )),
     // requestFields = Seq(PreferCacheField())
@@ -75,7 +84,7 @@ class PMPTW(val parentName:String = "Unknown")(implicit p: Parameters) extends L
   lazy val module = new PMPTWImp(this)
 }
 
-// @chiselName
+@chiselName
 class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer)
   with HasXSParameter with HasPMPtwConst { //with HasPerfEvents {
   val (mem, edge) = outer.node.out.head
@@ -105,7 +114,42 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
   pmpt.io.flush := io.sfence.valid || io.csr.satp.changed
 
   // mem
-  // TODO
+  // get_part函数负责将从L2取到的一个Cacheline的数据切片，取其中的8 Bytes， 即64 bits
+  def get_part(data: Vec[UInt], index: UInt): UInt = {
+    val inner_data = data.asTypeOf(Vec(data.getWidth / XLEN, UInt(XLEN.W)))
+    inner_data(index)
+  }
+  def addr_low_from_paddr(paddr: UInt) = {
+    paddr(log2Up(BlockBytes) - 1, log2Up(XLEN / 8))
+  }
+
+  // 取发送到L2的请求信息作为从L2取回数据的“mask”
+  val req_addr_low = RegInit(VecInit(Seq.fill(MemReqWidth)(0.U((log2Up(BlockBytes) - log2Up(XLEN / 8)).W))))
+  when (pmpt.io.mem.req.valid) {
+    req_addr_low(pmpt.io.mem.req.bits.id) := addr_low_from_paddr(pmpt.io.mem.req.bits.id)
+  }
+  // 将id、addr、size封装到Get请求中并发送到A通道
+  val memRead = edge.Get( // 确定请求的类型为Get
+    fromSource = pmpt.io.mem.req.bits.id,
+    toAddress = pmpt.io.mem.req.bits.addr, // 是否存在地址宽度不匹配的问题
+    lgSize = log2Up(BlockBytes).U
+  )._2
+  mem.a.bits := memRead
+  mem.a.valid := pmpt.io.mem.req.valid && !pmpt.io.flush
+  mem.d.ready := true.B
+  // mem -> data buffer
+  // 从L2取回两个Beats的数据
+  val refill_data = Reg(Vec(2, UInt((32 * 8).W)))
+  val refill_helper = edge.firstlastHelper(mem.d.bits, mem.d.fire())
+  val mem_resp_done = refill_helper._3
+  when (mem.d.valid) {
+    assert(mem.d.bits.source <= PMPtwSize.U)  // 不知道有什么用
+    refill_data(refill_helper._4) := mem.d.bits.data
+  }
+
+  pmpt.io.mem.resp.valid := mem_resp_done
+  val resp_back = get_part(refill_data, req_addr_low(mem.d.bits.source))
+  pmpt.io.mem.resp.bits := resp_back
 }
 
 // real PMPTW logic
