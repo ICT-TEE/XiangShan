@@ -737,6 +737,7 @@ class PtwIO(implicit p: Parameters) extends PtwBundle {
     val distribute_csr = Flipped(new DistributedCSRIO)
     val prefercache = Input(Bool())
   }
+  val pmptw = new PlbPtwIO
 }
 
 class L2TlbMemReqBundle(implicit p: Parameters) extends PtwBundle {

@@ -31,7 +31,7 @@ import xiangshan.backend.fu._
 import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.backend.rob.RobLsqIO
 import xiangshan.cache._
-import xiangshan.cache.mmu.{BTlbPtwIO, TLB, TlbReplace}
+import xiangshan.cache.mmu.{BTlbPtwIO, PLB, TLB, TlbReplace, PlbPtwIO}
 import xiangshan.mem._
 import xiangshan.mem.prefetch.{BasePrefecher, SMSParams, SMSPrefetcher}
 
@@ -87,6 +87,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     val stIn = Vec(exuParameters.StuCnt, ValidIO(new ExuInput))
     val memoryViolation = ValidIO(new Redirect)
     val ptw = new BTlbPtwIO(ld_tlb_ports + exuParameters.StuCnt)
+    val pmptw = new PlbPtwIO
     val sfence = Input(new SfenceBundle)
     val tlbCsr = Input(new TlbCsrBundle)
     val fenceToSbuffer = Flipped(new FenceToSbuffer)
@@ -292,6 +293,15 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
   XSDebug(tEnable.asUInt.orR, "Debug Mode: At least one store trigger is enabled\n")
   for(j <- 0 until TriggerNum)
     PrintTriggerInfo(tEnable(j), tdata(j))
+
+  //plb
+  val plb_ldst = Module(new PLB(total_tlb_ports, 8, 5))
+  for(i <- 0 until total_tlb_ports) {
+    plb_ldst.io.requestor(i) <> pmp_check(i).plb
+  }
+  plb_ldst.io.sfence <> RegNext(io.sfence)
+  plb_ldst.io.csr <> RegNext(io.tlbCsr)
+  io.pmptw <> plb_ldst.io.ptw
 
   // LoadUnit
   for (i <- 0 until exuParameters.LduCnt) {
