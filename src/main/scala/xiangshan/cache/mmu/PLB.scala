@@ -1,9 +1,9 @@
 package xiangshan.cache.mmu
 
 import chipsalliance.rocketchip.config.Parameters
-import chisel3.{Mux, Reg, _}
+import chisel3._
 import chisel3.internal.naming.chiselName
-import chisel3.util.{log2Up, _}
+import chisel3.util._
 import freechips.rocketchip.util.SRAMAnnotation
 import xiangshan._
 import utils._
@@ -95,7 +95,7 @@ class PLB (Width: Int = 4, EntrySize: Int = 8, FilterSize: Int = 5)(implicit p: 
     //val resp_miss = miss(i)
     //val resp_data = resp(i)
     val access = io.access(i)
-    val refill_mask = Mux(refill_valid, UIntToOH(refill_idx), 0.U(EntrySize.W))
+    //val refill_mask = Mux(refill_valid, UIntToOH(refill_idx), 0.U(EntrySize.W))
 
     //val hitvec = VecInit((entries.zipWithIndex).zip (v zip refill_mask.asBools).map{case (e, m) => e._1.hit(offset, ppn, asid, true) && m._1 && !m._2})
     val hitvec = VecInit((entries.zipWithIndex).zip (v).map{case (e, m) => e._1.hit(offset, ppn, io.csr.satp.asid, true) && m })

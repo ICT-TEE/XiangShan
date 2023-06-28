@@ -428,8 +428,14 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   ptw.io.csr.prefercache <> csrioIn.customCtrl.ptw_prefercache_enable
 
   // pmptable
+  pmptw.io.sfence <> fenceio.sfence
+  pmptw.io.csr <> csrioIn.tlb
   pmptw.io.req(0) <> frontend.io.pmptw.req
   pmptw.io.resp(0) <> frontend.io.pmptw.resp
+  pmptw.io.req(1) <> memBlock.io.pmptw.req
+  pmptw.io.resp(1) <> memBlock.io.pmptw.resp
+  pmptw.io.req(2) <> ptw.io.pmptw.req
+  pmptw.io.resp(2) <> ptw.io.pmptw.resp
 
   // if l2 prefetcher use stream prefetch, it should be placed in XSCore
   io.l2_pf_enable := csrioIn.customCtrl.l2_pf_enable
