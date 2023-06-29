@@ -96,11 +96,14 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
   val pmpt_arb = Module(new Arbiter(new PMPtwReqIO, PMPtwWidth))
   /* pmptw */
   // req
-  io.req.zipWithIndex.map{ case (req, i) =>   // alloc source id
-    req.bits.sourceId := i.U
-  }
+  // io.req.zipWithIndex.map{ case (req, i) =>   // alloc source id
+  //   req.bits.sourceId := i.U
+  // }
   pmpt_arb.io.in <> io.req
   pmpt.io.req <> pmpt_arb.io.out
+  pmpt_arb.io.in.zipWithIndex.map{ case (req, i) =>   // alloc source id
+    req.bits.sourceId := i.U
+  }
 
   // resp
   io.resp.map(_.valid := false.B)
@@ -127,7 +130,7 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
   // 取发送到L2的请求信息作为从L2取回数据的“mask”
   val req_addr_low = RegInit(VecInit(Seq.fill(MemReqWidth)(0.U((log2Up(BlockBytes) - log2Up(XLEN / 8)).W))))
   when (pmpt.io.mem.req.valid) {
-    req_addr_low(pmpt.io.mem.req.bits.id) := addr_low_from_paddr(pmpt.io.mem.req.bits.id)
+    req_addr_low(pmpt.io.mem.req.bits.id) := addr_low_from_paddr(pmpt.io.mem.req.bits.addr)
   }
   // 将id、addr、size封装到Get请求中并发送到A通道
   val memRead = edge.Get( // 确定请求的类型为Get
@@ -150,7 +153,8 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
 
   pmpt.io.mem.resp.valid := mem_resp_done
   val resp_back = get_part(refill_data, req_addr_low(mem.d.bits.source))
-  pmpt.io.mem.resp.bits := resp_back
+  pmpt.io.mem.resp.bits.data := resp_back
+  pmpt.io.mem.resp.bits.id := mem.d.bits.source
 }
 
 // real PMPTW logic
@@ -225,6 +229,7 @@ class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst {
 
   /* mem req */
   io.mem.req.valid := false.B
+  io.mem.req.bits := 0.U.asTypeOf(new MemReqIO)
   when (l2mem_req && !isPte(entries(l2req_ptr).rootData)) {
     io.mem.req.valid := true.B
     io.mem.req.bits.id := l2req_ptr
@@ -256,6 +261,7 @@ class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst {
 
   /* resp */
   io.resp.valid := false.B
+  io.resp.bits := 0.U.asTypeOf(new PMPtwRespIO)
   when (deq_fire) {
     io.resp.valid := true.B
     io.resp.bits.level := entries(deq_ptr).level
