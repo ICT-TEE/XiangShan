@@ -560,10 +560,12 @@ class PMPChecker
     io.resp := RegEnable(resp, io.req.valid)
   }
 
+  io.plb.req.valid := false.B
+  io.plb.req.bits := DontCare
+
   if (EnablePMPTable && pmpUsed) {
     require(!(sameCycle && pmpUsed))
 
-    io.plb.req.valid := false.B
     io.miss := false.B
     io.resp := RegEnable(resp, io.req.valid)
 

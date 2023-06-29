@@ -22,7 +22,7 @@ class PlbRequestIO(implicit p: Parameters) extends TlbBundle {
 
 class PlbPtwIO(implicit p: Parameters) extends TlbBundle {
   val req = DecoupledIO(new PMPtwReqIO)
-  val resp = Flipped(DecoupledIO(new PMPtwRespIO))
+  val resp = Flipped(ValidIO(new PMPtwRespIO))
 }
 
 class PlbReplaceAccessBundle(nSets: Int, nWays: Int)(implicit p: Parameters) extends TlbBundle {
@@ -125,13 +125,15 @@ val sfence = io.sfence
   }
 
   //ptw -> filter
-  val ptwreq= new PlbPtwIO
-  val filter_ptwreq = Wire(Vec(Width, ptwreq.req))
+  val ptwreq= Flipped(ValidIO(new PMPtwReqIO))
+  val filter_ptwreq = Wire(Vec(Width, ptwreq))
+  val refill_valid = WireInit(false.B)
 
   for (i <- 0 until Width) {
     filter_ptwreq(i).valid := RegNext(miss(i) && req(i).valid, init = false.B) && !RegNext(refill_valid, init = false.B)
     filter_ptwreq(i).bits.offset := RegNext(req(i).bits.offset)
     filter_ptwreq(i).bits.ppn := RegNext(req(i).bits.patp(43, 0))
+    filter_ptwreq(i).bits.sourceId := 0.U
   }
 
   //val FilterSize = 5
@@ -198,10 +200,11 @@ val sfence = io.sfence
 //filter -> ptw
   def filter_req() = {
     val reqs = plb_req.indices.map { i =>
-      val req = Wire(ptwreq.req)
+      val req = Wire(ptwreq)
       val merge = canMerge(i)
       req.bits := plb_req(i).bits
       req.valid := !merge && plb_req(i).valid
+      //plb_req(i).ready := DontCare
       req
     }
     reqs
@@ -232,7 +235,7 @@ val sfence = io.sfence
   io.ptw.req.valid := issue_valid && !issue_filtered
   io.ptw.req.bits.offset := filter_offset(issPtr)
   io.ptw.req.bits.ppn := filter_ppn(issPtr)
-  io.ptw.resp.ready := true.B
+  // io.ptw.resp.ready := true.B
 
   reqs.zipWithIndex.map {
     case (req, i) =>
@@ -302,7 +305,7 @@ val sfence = io.sfence
   }
 
   //refill
-  val refill_valid = ptwResp_valid && !sfence_dup.head.valid && !satp.changed
+  refill_valid := ptwResp_valid && !sfence_dup.head.valid && !satp.changed
   val re = ReplacementPolicy.fromString("plru", EntrySize)
   re.access(io.access.map(_.touch_ways))
   val refill_idx = re.way
