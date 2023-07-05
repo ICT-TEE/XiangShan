@@ -566,21 +566,24 @@ class PMPChecker
   if (EnablePMPTable && pmpUsed) {
     require(!(sameCycle && pmpUsed))
 
+    val pmpt_hit = res_pmp.cfg.t && pmp_match_idx < 15.U && io.check_env.mode < 2.U
     io.miss := false.B
-    io.resp := RegEnable(resp, io.req.valid)
 
     // hit pmptable
-    when (res_pmp.cfg.t && pmp_match_idx < 15.U) {
+    when (pmpt_hit) {
       io.plb.req.valid := true.B
       io.plb.req.bits.offset := req.addr - Mux(
         res_pmp.cfg.tor,
         Mux(pmp_match_idx === 0.U, 0.U, io.check_env.pmp(pmp_match_idx - 1.U).addr << 2.U),
         getBaseAddr(res_pmp.addr, res_pmp.mask))
-      io.plb.req.bits.patp := io.check_env.pmp(pmp_match_idx + 1.U).addr << 2.U
+      io.plb.req.bits.patp := io.check_env.pmp(pmp_match_idx + 1.U).addr
 
       io.miss := io.plb.miss
-      io.resp := resp_pma | pmp_check(req.cmd, io.plb.resp)
     }
+
+    io.resp := Mux(RegNext(pmpt_hit && !io.miss),
+      RegNext(resp_pma) | pmp_check(req.cmd, io.plb.resp),     // plb resp
+      RegEnable(resp, io.req.valid))
   }
 
   def getBaseAddr(cfgAddr: UInt, cfgMask: UInt): UInt = {

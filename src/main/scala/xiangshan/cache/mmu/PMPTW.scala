@@ -270,6 +270,7 @@ class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst {
     io.resp.bits.sourceIds := entries(deq_ptr).sourceIds
     io.resp.bits.data := Mux(
       entries(deq_ptr).level === 1.U, resp_data, entries(deq_ptr).rootData)
+    state(deq_ptr) := s_empty
   }
 
   /* flush */
