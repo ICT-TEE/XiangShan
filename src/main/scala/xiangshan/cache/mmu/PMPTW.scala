@@ -150,9 +150,12 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
     assert(mem.d.bits.source <= PMPtwSize.U)  // 不知道有什么用
     refill_data(refill_helper._4) := mem.d.bits.data
   }
+  // refill_data_tmp is the wire fork of refill_data, but one cycle earlier
+  val refill_data_tmp = WireInit(refill_data)
+  refill_data_tmp(refill_helper._4) := mem.d.bits.data
 
   pmpt.io.mem.resp.valid := mem_resp_done
-  val resp_back = get_part(refill_data, req_addr_low(mem.d.bits.source))
+  val resp_back = get_part(refill_data_tmp, req_addr_low(mem.d.bits.source))
   pmpt.io.mem.resp.bits.data := resp_back
   pmpt.io.mem.resp.bits.id := mem.d.bits.source
 }
@@ -216,8 +219,7 @@ class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst {
     when (!tag_eq) {
       entries(enq_ptr).offset := io.req.bits.offset
       entries(enq_ptr).ppn := io.req.bits.ppn
-      entries(enq_ptr).sourceIds :=
-        setBits(entries(enq_ptr).sourceIds, io.req.bits.sourceId)
+      entries(enq_ptr).sourceIds := 1.U << io.req.bits.sourceId
       entries(enq_ptr).level := 0.U
       state(enq_ptr) := s_l1req
 
