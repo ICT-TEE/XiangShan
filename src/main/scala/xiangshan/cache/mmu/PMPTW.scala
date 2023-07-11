@@ -28,7 +28,7 @@ import freechips.rocketchip.tilelink._
 trait HasPMPtwConst {
   val PMPtwWidth = 3
 
-  val PMPtwSize = 6
+  val PMPtwSize = 3
   val MemReqWidth = PMPtwSize
 
   val BlockBytes = 64
@@ -87,13 +87,13 @@ class PMPTW()(implicit p: Parameters) extends LazyModule with HasPMPtwConst {
 
 @chiselName
 class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer)
-  with HasXSParameter with HasPMPtwConst { //with HasPerfEvents {
+  with HasXSParameter with HasPMPtwConst with HasPerfEvents {
   val (mem, edge) = outer.node.out.head
 
   val io = IO(new PMPtwIO)
 
   val pmpt = Module(new BasePMPTW)
-  val pmpt_arb = Module(new Arbiter(new PMPtwReqIO, PMPtwWidth))
+  val pmpt_arb = Module(new RRArbiter(new PMPtwReqIO, PMPtwWidth))
   /* pmptw */
   // req
   // io.req.zipWithIndex.map{ case (req, i) =>   // alloc source id
@@ -158,6 +158,9 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
   val resp_back = get_part(refill_data_tmp, req_addr_low(mem.d.bits.source))
   pmpt.io.mem.resp.bits.data := resp_back
   pmpt.io.mem.resp.bits.id := mem.d.bits.source
+
+  val perfEvents  = pmpt.getPerfEvents
+  generatePerfEvent()
 }
 
 // real PMPTW logic
@@ -169,7 +172,7 @@ class PMPtwEntry(implicit p: Parameters) extends XSBundle with HasPMPtwConst {
   val level = UInt(1.W)
 }
 
-class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst {
+class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst with HasPerfEvents {
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new PMPtwReqIO))
     val resp = Valid(new PMPtwRespIO)
@@ -305,4 +308,22 @@ class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst {
   def setBits(bits: UInt, pos: UInt) = {
     bits | (1.U << pos)
   }
+
+  /* PerfCounter */
+  XSPerfAccumulate("pmptw_in_count", io.req.fire)
+  XSPerfAccumulate("pmptw_in_block", io.req.valid && !io.req.ready)
+  XSPerfAccumulate("pmptw_in_merge_count", io.req.fire && tag_eq)
+  for (i <- 0 until PMPtwSize) {
+    XSPerfAccumulate(s"pmptw_entry${i}_in_count", io.req.fire && enq_ptr === i.U)
+  }
+  XSPerfAccumulate("mem_req_count", io.mem.req.valid)
+  XSPerfAccumulate("mem_total_cycle", PopCount(l1resp_vec) =/= 0.U ||
+                                      PopCount(l2resp_vec) =/= 0.U)
+  XSPerfAccumulate("pmptw_l1deq_count", deq_fire && entries(deq_ptr).level === 1.U)
+
+  val perfEvents = Seq(
+    ("pmptw_in_count      ", io.req.fire      ),
+    ("mem_req_count       ", io.mem.req.valid ),
+  )
+  generatePerfEvent()
 }
