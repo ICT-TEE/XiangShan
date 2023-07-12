@@ -340,4 +340,24 @@ val sfence = io.sfence
       asid_hit && tag_match && tag_ppn_match
     }
   }
+  for (i <- 0 until Width) {
+    XSPerfAccumulate(s"plb_access_count${i}", req(i).valid)
+    XSPerfAccumulate(s"plb_miss_count${i}", req(i).valid & miss(i))
+  }
+  for (i <- 0 until EntrySize) {
+    XSPerfAccumulate(s"entry_invalid2valid${i}", v(i) & !RegNext(v(i)))
+    XSPerfAccumulate(s"replace_way_counter${i}", refill_valid & (refill_idx === i.U))
+  }
+  for (i <- 0 until FilterSize) {
+    XSPerfAccumulate(s"filter_invalid2valid${i}", filter_v(i) & !RegNext(filter_v(i)))
+    XSPerfAccumulate(s"filter_valid2invalid${i}", !filter_v(i) & RegNext(filter_v(i)))
+  }
+  XSPerfAccumulate("plb_req_count_filtered", Mux(do_enq, accumEnqNum(Width - 1), 0.U))
+  XSPerfAccumulate("ptw_req_count", io.ptw.req.fire())
+  XSPerfAccumulate("ptw_req_cycle", inflight_counter)
+  XSPerfAccumulate("ptw_resp_count", io.ptw.resp.fire())
+  XSPerfAccumulate("inflight_cycle", !isEmptyDeq)
+  for (i <- 0 until FilterSize + 1) {
+    XSPerfAccumulate(s"counter${i}", counter === i.U)
+  }
 }
