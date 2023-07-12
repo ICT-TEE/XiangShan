@@ -67,7 +67,11 @@ class PlbEntry(implicit p: Parameters) extends TlbBundle {
     val resp = Wire(UInt(4.W))
       when (level.asBool()) { resp := permvec(perm_offset)
     }.otherwise{
-    resp := perm(4, 1)
+        when (perm(0)){
+          resp := perm(4, 1)
+        }.otherwise{
+          resp := 0.U(4.W)
+        }
       }
   resp
   }
