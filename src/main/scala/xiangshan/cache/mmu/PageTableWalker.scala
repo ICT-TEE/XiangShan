@@ -129,11 +129,11 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
     }
 
     is (s_mem_resp) {
-      when(mem.resp.fire()) {
-          state := s_pm_waiting
-        }
-      af_level := af_level + 1.U
+      when(mem.resp.fire()){
+        state := s_pm_waiting
+        af_level := af_level + 1.U
       }
+    }
 
     is(s_pm_waiting){
       when(find_pte || llptw_valid || !pmptable_miss) {

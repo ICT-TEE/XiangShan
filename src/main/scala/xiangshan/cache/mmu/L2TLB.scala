@@ -90,7 +90,7 @@ class PTWImp(outer: PTW)(implicit p: Parameters) extends PtwModule(outer) with H
   pmp.io.distribute_csr := io.csr.distribute_csr
   pmp_check.foreach(_.check_env.apply(ModeS, pmp.io.pmp, pmp.io.pma))
 
-  val plb_ptw = Module(new PLB(2, 3, 3))
+  val plb_ptw = Module(new PLB(2, 3, 4))
   for(i <- 0 until 2){
     plb_ptw.io.requestor(i) <> pmp_check(i).plb
   }
