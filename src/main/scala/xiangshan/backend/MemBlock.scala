@@ -292,7 +292,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     PrintTriggerInfo(tEnable(j), tdata(j))
 
   //plb
-  val plb_ldst = Module(new PLB(total_tlb_ports, 8, 5))
+  val plb_ldst = Module(new PLB(total_tlb_ports, 5, 4))
   for(i <- 0 until total_tlb_ports) {
     plb_ldst.io.requestor(i) <> pmp_check(i).plb
   }
