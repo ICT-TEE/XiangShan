@@ -26,7 +26,7 @@ import utils.MaskedRegMap.WritableMask
 import xiangshan._
 import xiangshan.backend.fu.util.HasCSRConst
 import utils._
-import xiangshan.cache.mmu.{TlbCmd, TlbExceptionBundle, PlbRequestIO}
+import xiangshan.cache.mmu.{TlbCmd, TlbExceptionBundle}
 
 trait PMPConst extends HasPMParameters {
   val PMPOffBits = 2 // minimal 4bytes
@@ -479,6 +479,15 @@ class PMPCheckerEnv(implicit p: Parameters) extends PMPBundle {
     this.pmp := pmp
     this.pma := pma
   }
+}
+
+class PlbRequestIO(implicit p: Parameters) extends PMPBundle {
+  val req = Flipped(ValidIO(new Bundle {
+    val offset = UInt(34.W)
+    val patp = UInt(64.W)
+  }))
+  val miss = Output(Bool())
+  val resp = Output(new PMPPerm())
 }
 
 class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {

@@ -7,18 +7,18 @@ import chisel3.util._
 import freechips.rocketchip.util.SRAMAnnotation
 import xiangshan._
 import utils._
-import xiangshan.backend.fu.{PMPChecker, PMPReqBundle, PMPPerm}
+import xiangshan.backend.fu.{PMPChecker, PMPReqBundle, PMPPerm, PlbRequestIO}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.util.HasCSRConst
 
-class PlbRequestIO(implicit p: Parameters) extends TlbBundle {
-  val req = Flipped(ValidIO(new Bundle {
-    val offset = UInt(34.W)
-    val patp = UInt(XLEN.W)
-  }))
-  val miss = Output(Bool())
-  val resp = Output(new PMPPerm())
-}
+// class PlbRequestIO(implicit p: Parameters) extends TlbBundle {
+//   val req = Flipped(ValidIO(new Bundle {
+//     val offset = UInt(34.W)
+//     val patp = UInt(XLEN.W)
+//   }))
+//   val miss = Output(Bool())
+//   val resp = Output(new PMPPerm())
+// }
 
 class PlbPtwIO(implicit p: Parameters) extends TlbBundle {
   val req = DecoupledIO(new PMPtwReqIO)
