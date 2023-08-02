@@ -185,7 +185,7 @@ class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst with
 
   val entries = Reg(Vec(PMPtwSize, new PMPtwEntry()))
   // waste 3 cycle
-  val s_empty :: s_l1req :: s_l1resp :: s_l2req :: s_l2resp :: s_deq :: Nil = Enum(6);
+  val s_empty :: s_l1req :: s_l1resp :: s_l2req :: s_l2resp :: s_deq :: s_flush_wait_mem :: Nil = Enum(7);
   val state = RegInit(VecInit(Seq.fill(PMPtwSize)(s_empty)))
 
   val empty_vec   = state.map(_ === s_empty)
@@ -209,6 +209,7 @@ class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst with
 
   val tag_eq_vec = entries.indices.map(i =>
     state(i) =/= s_empty && state(i) =/= s_deq &&
+    state(i) =/= s_flush_wait_mem &&
     makeTag(io.req.bits.ppn, io.req.bits.offset) ===
     makeTag(entries(i).ppn, entries(i).offset)
   )
@@ -261,6 +262,9 @@ class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst with
     }.elsewhen (resp_state === s_l2resp) {
       resp_data := io.mem.resp.bits.data
       resp_state := s_deq
+
+    }.elsewhen (resp_state === s_flush_wait_mem) {
+      resp_state := s_empty
     }
   }
 
@@ -284,7 +288,10 @@ class BasePMPTW(implicit p: Parameters) extends XSModule with HasPMPtwConst with
     io.req.ready := false.B
     io.resp.valid := false.B
 
-    state.map(_ := s_empty)
+    state.map(x => x := Mux(x === s_l1resp || x === s_l2resp, s_flush_wait_mem, s_empty))
+    when (io.mem.resp.valid) {
+      state(io.mem.resp.bits.id) := s_empty
+    }
   }
 
   /* funtion */
