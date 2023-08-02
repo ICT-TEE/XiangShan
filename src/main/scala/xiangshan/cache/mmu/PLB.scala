@@ -122,9 +122,9 @@ class PLB (Width: Int = 4, EntrySize: Int = 8, FilterSize: Int = 5)(implicit p: 
   }
 
 //sfence
-val sfence = io.sfence
+//val sfence = io.sfence
 
-  when(io.sfence.valid && sfence.bits.rs1 && sfence.bits.rs2) {
+  when(sfence_dup(1).valid ){//&& sfence_dup(0).bits.rs1 && sfence_dup(0).bits.rs2) {
         v.map(_ := false.B)  //all entries
   }
 
@@ -152,7 +152,7 @@ val sfence = io.sfence
   val mayFullDeq = RegInit(false.B)
   val mayFullIss = RegInit(false.B)
   val counter = RegInit(0.U(log2Up(FilterSize + 1).W))
-  val flush = DelayN(io.sfence.valid || io.csr.satp.changed, 2) //todo
+  val flush = DelayN(io.sfence.valid || io.csr.satp.changed, 1) //todo
   //val tlb_req = WireInit(io.tlb.req)
   val plb_req = WireInit(filter_ptwreq)
 
