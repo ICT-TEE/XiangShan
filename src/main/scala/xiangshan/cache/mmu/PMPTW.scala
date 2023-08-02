@@ -28,7 +28,7 @@ import freechips.rocketchip.tilelink._
 trait HasPMPtwConst {
   val PMPtwWidth = 3
 
-  val PMPtwSize = 3
+  val PMPtwSize = 4
   val MemReqWidth = PMPtwSize
 
   val BlockBytes = 64
@@ -115,7 +115,7 @@ class PMPTWImp(outer: PMPTW)(implicit p: Parameters) extends LazyModuleImp(outer
   }
   io.resp.map(_.bits.sourceIds := 0.U)  // delete source id
   // flush
-  pmpt.io.flush := io.sfence.valid || io.csr.satp.changed
+  pmpt.io.flush := DelayN(io.sfence.valid || io.csr.satp.changed, 2)
 
   // mem
   // get_part函数负责将从L2取到的一个Cacheline的数据切片，取其中的8 Bytes， 即64 bits
