@@ -408,7 +408,7 @@ trait PMPCheckMethod extends PMPConst {
   def pmp_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
     resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !cfg.r
-    resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && !cfg.w
+    resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && (!cfg.w || (cfg.w && !cfg.r))
     resp.instr := TlbCmd.isExec(cmd) && !cfg.x
     resp.mmio := false.B
     resp
@@ -417,7 +417,7 @@ trait PMPCheckMethod extends PMPConst {
   def pmp_check(cmd: UInt, perm: PMPPerm) = {
     val resp = Wire(new PMPRespBundle)
     resp.ld := TlbCmd.isRead(cmd) && !TlbCmd.isAmo(cmd) && !perm.r
-    resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && !perm.w
+    resp.st := (TlbCmd.isWrite(cmd) || TlbCmd.isAmo(cmd)) && (!perm.w || (perm.w && !perm.r))
     resp.instr := TlbCmd.isExec(cmd) && !perm.x
     resp.mmio := false.B
     resp
