@@ -135,7 +135,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           normalReplacer = Some("setplru"),
           superNWays = 4,
           normalAsVictim = true,
-          partialStaticPMP = true,
+          partialStaticPMP = false, // pmptable dont use static pmp
           outReplace = false
         ),
         sttlbParameters = TLBParameters(
@@ -146,7 +146,7 @@ class MinimalConfig(n: Int = 1) extends Config(
           normalReplacer = Some("setplru"),
           normalAsVictim = true,
           superNWays = 4,
-          partialStaticPMP = true,
+          partialStaticPMP = false,
           outReplace = false
         ),
         btlbParameters = TLBParameters(

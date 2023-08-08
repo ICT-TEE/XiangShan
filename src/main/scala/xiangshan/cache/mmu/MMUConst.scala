@@ -45,7 +45,9 @@ case class TLBParameters
   shouldBlock: Boolean = false, // only for perf, not support for io
   partialStaticPMP: Boolean = false, // partila static pmp result stored in entries
   saveLevel: Boolean = false
-)
+) {
+  assert(partialStaticPMP == false, "if use pmptable must shut down static pmp")
+}
 
 case class L2TLBParameters
 (
