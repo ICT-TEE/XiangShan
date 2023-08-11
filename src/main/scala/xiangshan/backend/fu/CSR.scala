@@ -85,6 +85,7 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
   val set_vstart = Output(Valid(UInt(XLEN.W)))
   val set_vl = Output(Valid(UInt(XLEN.W)))
   val set_vtype = Output(Valid(UInt(XLEN.W)))
+  val set_vxsat = Output(Valid(UInt(1.W)))
 
   val dirty_vs = Output(Bool())
 }
@@ -158,7 +159,16 @@ class CSRFileIO(implicit p: Parameters) extends XSBundle {
   val distributedUpdate = Vec(2, Flipped(new DistributedCSRUpdateReq))
 }
 
-class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
+class VtypeStruct(implicit p: Parameters) extends XSBundle {
+  val vill = UInt(1.W)
+  val reserved = UInt((XLEN - 9).W)
+  val vma = UInt(1.W)
+  val vta = UInt(1.W)
+  val vsew = UInt(3.W)
+  val vlmul = UInt(3.W)
+}
+
+class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   with HasCSRConst
   with PMPMethod
   with PMAMethod
@@ -171,9 +181,9 @@ class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
 
   val (valid, src1, src2, func) = (
     io.in.valid,
-    io.in.bits.src(0),
-    io.in.bits.imm,
-    io.in.bits.fuOpType
+    io.in.bits.data.src(0),
+    io.in.bits.data.imm,
+    io.in.bits.ctrl.fuOpType
   )
 
   // CSR define
@@ -395,6 +405,7 @@ class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
   if (HasVPU) { extList = extList :+ 'v' }
   val misaInitVal = getMisaMxl(2) | extList.foldLeft(0L)((sum, i) => sum | getMisaExt(i)) //"h8000000000141105".U
   val misa = RegInit(UInt(XLEN.W), misaInitVal.U)
+  println(s"[CSR] supported isa ext: $extList")
 
   // MXL = 2          | 0 | EXT = b 00 0000 0100 0001 0001 0000 0101
   // (XLEN-1, XLEN-2) |   |(25, 0)  ZY XWVU TSRQ PONM LKJI HGFE DCBA
@@ -509,9 +520,35 @@ class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
 
   // spfctl Bit 0: L1I Cache Prefetcher Enable
   // spfctl Bit 1: L2Cache Prefetcher Enable
-  val spfctl = RegInit(UInt(XLEN.W), "b11".U)
+  // spfctl Bit 2: L1D Cache Prefetcher Enable
+  // spfctl Bit 3: L1D train prefetch on hit
+  // spfctl Bit 4: L1D prefetch enable agt
+  // spfctl Bit 5: L1D prefetch enable pht
+  // spfctl Bit [9:6]: L1D prefetch active page threshold
+  // spfctl Bit [15:10]: L1D prefetch active page stride
+  // turn off L2 BOP, turn on L1 SMS by default
+  val spfctl = RegInit(UInt(XLEN.W), Seq(
+    0 << 17,    // L2 pf store only [17] init: false
+    1 << 16,    // L1D pf enable stride [16] init: true
+    30 << 10,   // L1D active page stride [15:10] init: 30
+    12 << 6,    // L1D active page threshold [9:6] init: 12
+    1  << 5,    // L1D enable pht [5] init: true
+    1  << 4,    // L1D enable agt [4] init: true
+    0  << 3,    // L1D train on hit [3] init: false
+    1  << 2,    // L1D pf enable [2] init: true
+    1  << 1,    // L2 pf enable [1] init: true
+    1  << 0,    // L1I pf enable [0] init: true
+  ).reduce(_|_).U(XLEN.W))
   csrio.customCtrl.l1I_pf_enable := spfctl(0)
   csrio.customCtrl.l2_pf_enable := spfctl(1)
+  csrio.customCtrl.l1D_pf_enable := spfctl(2)
+  csrio.customCtrl.l1D_pf_train_on_hit := spfctl(3)
+  csrio.customCtrl.l1D_pf_enable_agt := spfctl(4)
+  csrio.customCtrl.l1D_pf_enable_pht := spfctl(5)
+  csrio.customCtrl.l1D_pf_active_threshold := spfctl(9, 6)
+  csrio.customCtrl.l1D_pf_active_stride := spfctl(15, 10)
+  csrio.customCtrl.l1D_pf_enable_stride := spfctl(16)
+  csrio.customCtrl.l2_pf_store_only := spfctl(17)
 
   // sfetchctl Bit 0: L1I Cache Parity check enable
   val sfetchctl = RegInit(UInt(XLEN.W), "b0".U)
@@ -642,15 +679,6 @@ class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
     assert(this.getWidth == XLEN)
   }
 
-  class VtypeStruct extends Bundle {
-    val vill = UInt(1.W)
-    val reserved = UInt((XLEN-9).W)
-    val vma = UInt(1.W)
-    val vta = UInt(1.W)
-    val vsew = UInt(3.W)
-    val vlmul = UInt(3.W)
-  }
-
   def vxrm_wfn(wdata: UInt): UInt = {
     val vcsrOld = WireInit(vcsr.asTypeOf(new VcsrStruct))
     csrw_dirty_vs_state := true.B
@@ -659,11 +687,16 @@ class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
   }
   def vxrm_rfn(rdata: UInt): UInt = rdata(2,1)
 
-  def vxsat_wfn(wdata: UInt): UInt = {
+  def vxsat_wfn(update: Boolean)(wdata: UInt): UInt = {
     val vcsrOld = WireInit(vcsr.asTypeOf(new VcsrStruct))
+    val vcsrNew = WireInit(vcsrOld)
     csrw_dirty_vs_state := true.B
-    vcsrOld.vxsat := wdata(0)
-    vcsrOld.asUInt
+    if (update) {
+      vcsrNew.vxsat := wdata(0) | vcsrOld.vxsat
+    } else {
+      vcsrNew.vxsat := wdata(0)
+    }
+    vcsrNew.asUInt
   }
   def vxsat_rfn(rdata: UInt): UInt = rdata(0)
 
@@ -678,7 +711,7 @@ class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
   val vcsrMapping = Map(
     MaskedRegMap(Vstart, vstart),
     MaskedRegMap(Vxrm, vcsr, wfn = vxrm_wfn, rfn = vxrm_rfn),
-    MaskedRegMap(Vxsat, vcsr, wfn = vxsat_wfn, rfn = vxsat_rfn),
+    MaskedRegMap(Vxsat, vcsr, wfn = vxsat_wfn(false), rfn = vxsat_rfn),
     MaskedRegMap(Vcsr, vcsr, wfn = vcsr_wfn),
     MaskedRegMap(Vl, vl),
     MaskedRegMap(Vtype, vtype),
@@ -868,7 +901,7 @@ class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
   csrio.disableSfence := tvmNotPermit
 
   // general CSR wen check
-  val wen = valid && func =/= CSROpType.jmp && (addr=/=Satp.U || satpLegalMode)
+  val wen = valid && CSROpType.needAccess(func) && (addr=/=Satp.U || satpLegalMode)
   val dcsrPermitted = dcsrPermissionCheck(addr, false.B, debugMode)
   val triggerPermitted = triggerPermissionCheck(addr, true.B, debugMode) // todo dmode
   val modePermitted = csrAccessPermissionCheck(addr, false.B, priviledgeMode) && dcsrPermitted && triggerPermitted
@@ -876,8 +909,8 @@ class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
   val permitted = Mux(addrInPerfCnt, perfcntPermitted, modePermitted) && accessPermitted
 
   MaskedRegMap.generate(mapping, addr, rdata, wen && permitted, wdata)
-  io.out.bits.data := rdata
-  io.out.bits.flushPipe.get := flushPipe
+  io.out.bits.res.data := rdata
+  io.out.bits.ctrl.flushPipe.get := flushPipe
   connectNonPipedCtrlSingal
 
   // send distribute csr a w signal
@@ -903,6 +936,9 @@ class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
 
   when (RegNext(csrio.fpu.fflags.valid)) {
     fcsr := fflags_wfn(update = true)(RegNext(csrio.fpu.fflags.bits))
+  }
+  when(RegNext(csrio.vpu.set_vxsat.valid)) {
+    vcsr := vxsat_wfn(update = true)(RegNext(csrio.vpu.set_vxsat.bits))
   }
   // set fs and sd in mstatus
   when (csrw_dirty_fp_state || RegNext(csrio.fpu.dirty_fs)) {
@@ -963,8 +999,8 @@ class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
   val isDret   = addr === privDret   && func === CSROpType.jmp
   val isWFI    = func === CSROpType.wfi
 
-  XSDebug(wen, "csr write: pc %x addr %x rdata %x wdata %x func %x\n", io.in.bits.pc.get, addr, rdata, wdata, func)
-  XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", io.in.bits.pc.get, mstatus, mideleg , medeleg, priviledgeMode)
+  XSDebug(wen, "csr write: pc %x addr %x rdata %x wdata %x func %x\n", io.in.bits.data.pc.get, addr, rdata, wdata, func)
+  XSDebug(wen, "pc %x mstatus %x mideleg %x medeleg %x mode %x\n", io.in.bits.data.pc.get, mstatus, mideleg , medeleg, priviledgeMode)
 
   // Illegal priviledged operation list
   val illegalMret = valid && isMret && priviledgeMode < ModeM
@@ -1062,7 +1098,7 @@ class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
   // * unimplemented csr is being read/written
   // * csr access is illegal
   csrExceptionVec(illegalInstr) := isIllegalAddr || isIllegalAccess || isIllegalPrivOp
-  io.out.bits.exceptionVec.get := csrExceptionVec
+  io.out.bits.ctrl.exceptionVec.get := csrExceptionVec
 
   XSDebug(io.in.valid && isEbreak, s"Debug Mode: an Ebreak is executed, ebreak cause exception ? ${ebreakCauseException}\n")
 
@@ -1253,7 +1289,7 @@ class CSR(cfg: FuConfig)(implicit val p: Parameters) extends FuncUnit(cfg)
     debugMode := debugModeNew
   }
 
-  XSDebug(raiseExceptionIntr && delegS, "sepc is written!!! pc:%x\n", io.in.bits.pc.get)
+  XSDebug(raiseExceptionIntr && delegS, "sepc is written!!! pc:%x\n", io.in.bits.data.pc.get)
 
   // Distributed CSR update req
   //

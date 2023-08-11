@@ -29,9 +29,6 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
     // originally {1, 2, ..., size - 1} are free. Register 0-31 are mapped to x0.
     Seq.tabulate(size - 1)(i => (i + 1).U(PhyRegIdxWidth.W)) :+ 0.U(PhyRegIdxWidth.W)))
 
-  val io_extra = IO(new Bundle {
-    val debug_vconfig_rat = Input(UInt(PhyRegIdxWidth.W))
-  })
   // head and tail pointer
   val headPtr = RegInit(FreeListPtr(false, 0))
   val headPtrOH = RegInit(1.U(size.W))
@@ -100,18 +97,12 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
   io.canAllocate := freeRegCntReg >= RenameWidth.U
 
   val debugArchHeadPtr = RegNext(RegNext(archHeadPtr, FreeListPtr(false, 0)), FreeListPtr(false, 0)) // two-cycle delay from refCounter
-//  val debugArchRAT = RegNext(RegNext(io.debug_rat, VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W)))), VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
-//  val debugUniqPR = Seq.tabulate(32)(i => i match {
-//    case 0 => true.B
-//    case _ => !debugArchRAT.take(i).map(_ === debugArchRAT(i)).reduce(_ || _)
-//  })
-
-  val debugArchRAT = RegNext(RegNext(VecInit(io.debug_rat :+ io_extra.debug_vconfig_rat), VecInit(Seq.fill(33)(0.U(PhyRegIdxWidth.W)))), VecInit(Seq.fill(33)(0.U(PhyRegIdxWidth.W))))
-  val debugUniqPR = Seq.tabulate(33)(i => i match {
+  val debugArchRAT = RegNext(RegNext(io.debug_rat, VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W)))), VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
+  val debugUniqPR = Seq.tabulate(32)(i => i match {
     case 0 => true.B
     case _ => !debugArchRAT.take(i).map(_ === debugArchRAT(i)).reduce(_ || _)
   })
-  XSError(distanceBetween(tailPtr, debugArchHeadPtr) +& PopCount(debugUniqPR) =/= NRPhyRegs.U, "Integer physical register should be in either arch RAT or arch free list\n")
+  XSError(distanceBetween(tailPtr, debugArchHeadPtr) +& PopCount(debugUniqPR) =/= size.U, "Integer physical register should be in either arch RAT or arch free list\n")
 
   val perfEvents = Seq(
     ("me_freelist_1_4_valid", freeRegCntReg <  (size / 4).U                                     ),

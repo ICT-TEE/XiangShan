@@ -1,87 +1,108 @@
 /***************************************************************************************
-* Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
-* Copyright (c) 2020-2021 Peng Cheng Laboratory
-*
-* XiangShan is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2.
-* You may obtain a copy of Mulan PSL v2 at:
-*          http://license.coscl.org.cn/MulanPSL2
-*
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-*
-* See the Mulan PSL v2 for more details.
-***************************************************************************************/
+ * Copyright (c) 2020-2021 Institute of Computing Technology, Chinese Academy of Sciences
+ * Copyright (c) 2020-2021 Peng Cheng Laboratory
+ *
+ * XiangShan is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 
 package xiangshan.backend.fu
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
-import utility.ParallelMux
 import xiangshan._
+import xiangshan.backend.fu.vector.Bundles.{VConfig, VType, Vl}
 
-class VsetModule(implicit p: Parameters) extends XSModule {
-  val io = IO(new Bundle() {
-    val lsrc0NotZero = Input(Bool())
-    val ldest = Input(UInt(6.W))
-    val src0  = Input(UInt(XLEN.W))
-    val src1  = Input(UInt(XLEN.W))
-    val func  = Input(FuOpType())
-    val vconfig = Input(UInt(16.W))
+class VsetModuleIO(implicit p: Parameters) extends XSBundle {
+  private val vlWidth = p(XSCoreParamsKey).vlWidth
 
-    val res   = Output(UInt(XLEN.W))
+  val in = Input(new Bundle {
+    val avl   : UInt = UInt(XLEN.W)
+    val vtype : VType = VType()
+    val func  : UInt = FuOpType()
   })
 
-  val vtype = io.src1(7, 0)
-  val vlmul = vtype(2, 0)
-  val vsew = vtype(5, 3)
+  val out = Output(new Bundle {
+    val vconfig: VConfig = VConfig()
+  })
 
-  val avlImm = Cat(0.U(3.W), io.src1(14, 10))
-  val vlLast = io.vconfig(15, 8)
-
-  val rd = io.ldest
-  val lsrc0NotZero = io.lsrc0NotZero
-  val vl = WireInit(0.U(XLEN.W))
-  val vconfig = WireInit(0.U(XLEN.W))
-
-  // vlen =  128
-  val vlmaxVec = (0 to 7).map(i => if(i < 4) (16 << i).U(8.W) else (16 >> (8 - i)).U(8.W))
-  val shamt = vlmul + (~vsew).asUInt + 1.U
-  val vlmax = ParallelMux((0 to 7).map(_.U).map(_ === shamt), vlmaxVec)
-
-  val isVsetivli = io.func === ALUOpType.vsetivli2 || io.func === ALUOpType.vsetivli1
-  val vlWhenRs1Not0 = Mux(isVsetivli, Mux(avlImm > vlmax, vlmax, avlImm),
-                                      Mux(io.src0 > vlmax, vlmax, io.src0))
-  vl := Mux(isVsetivli, Mux(avlImm > vlmax, vlmax, avlImm),
-        Mux(lsrc0NotZero, Mux(io.src0 > vlmax, vlmax, io.src0),
-        Mux(rd === 0.U, Cat(0.U(56.W), vlLast), vlmax)))
-
-  vconfig := Cat(0.U(48.W), vl(7, 0), vtype)
-
-  io.res := Mux(io.func === ALUOpType.vsetvli2 || io.func === ALUOpType.vsetvl2 || io.func === ALUOpType.vsetivli2, vl, vconfig)
+  // test bundle for internal state
+  val testOut = Output(new Bundle {
+    val log2Vlmax : UInt = UInt(3.W)
+    val vlmax     : UInt = UInt(vlWidth.W)
+  })
 }
 
-//class Vset(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
-//
-//  val uop = io.in.bits
-//
-//  // vset
-//
-//  val isVset = ALUOpType.isVset(io.in.bits.fuOpType)
-//  val dataModule = Module(new VsetModule)
-//
-//  dataModule.io.lsrc0NotZero := uop.imm(15) // lsrc(0) Not Zero
-//  dataModule.io.ldest := uop.ldest
-//  dataModule.io.src0 := io.in.bits.src(0)
-//  dataModule.io.src1 := io.in.bits.src(1)
-//  dataModule.io.func := io.in.bits.fuOpType
-//  dataModule.io.vconfig := uop.vconfig
-//
-//  io.in.ready := io.out.ready
-//  io.out.valid := io.in.valid && isVset
-//  io.out.bits.robIdx <> io.in.bits.robIdx
-//  io.out.bits.pc := io.in.bits.pc
-//  io.out.bits.data := dataModule.io.res
-//}
+class VsetModule(implicit p: Parameters) extends XSModule {
+  val io = IO(new VsetModuleIO)
+
+  private val avl   = io.in.avl
+  private val func  = io.in.func
+  private val vtype = io.in.vtype
+
+  private val outVConfig = io.out.vconfig
+
+  private val vlWidth = p(XSCoreParamsKey).vlWidth
+
+  private val isSetVlmax = VSETOpType.isSetVlmax(func)
+  private val isVsetivli = VSETOpType.isVsetivli(func)
+
+  private val vlmul: UInt = vtype.vlmul
+  private val vsew : UInt = vtype.vsew
+
+  private val vl = WireInit(0.U(XLEN.W))
+
+  // EncodedLMUL = log(LMUL)
+  // EncodedSEW  = log(SEW) - 3
+  //        VLMAX  = VLEN * LMUL / SEW
+  // => log(VLMAX) = log(VLEN * LMUL / SEW)
+  // => log(VLMAX) = log(VLEN) + log(LMUL) - log(SEW)
+  // =>     VLMAX  = 1 << log(VLMAX)
+  //               = 1 << (log(VLEN) + log(LMUL) - log(SEW))
+
+  // vlen =  128
+  private val log2Vlen = log2Up(VLEN)
+  println(s"[VsetModule] log2Vlen: $log2Vlen")
+  println(s"[VsetModule] vlWidth: $vlWidth")
+
+  private val log2Vlmul = vlmul
+  private val log2Vsew = vsew +& "b011".U
+
+  // vlen = 128, lmul = 8, sew = 8, log2Vlen = 7,
+  // vlmul = b011, vsew = 0, 7 + 3 - (0 + 3) = 7
+  // vlen = 128, lmul = 2, sew = 16
+  // vlmul = b001, vsew = 1, 7 + 1 - (1 + 3) = 4
+  private val log2Vlmax: UInt = log2Vlen.U(3.W) + log2Vlmul - log2Vsew
+  private val vlmax = (1.U(vlWidth.W) << log2Vlmax).asUInt
+
+  private val normalVL = Mux(avl > vlmax, vlmax, avl)
+
+  vl := Mux(isSetVlmax, vlmax, normalVL)
+
+  private val log2Elen = log2Up(ELEN)
+  private val log2VsewMax = Mux(log2Vlmul(2), log2Elen.U + log2Vlmul, log2Elen.U)
+
+  private val sewIllegal = log2Vsew > log2VsewMax
+  private val lmulIllegal = vlmul === "b100".U
+
+  private val illegal = lmulIllegal | sewIllegal | vtype.illegal
+
+  outVConfig.vl := Mux(illegal, 0.U, vl)
+  outVConfig.vtype.illegal := illegal
+  outVConfig.vtype.vta := Mux(illegal, 0.U, vtype.vta)
+  outVConfig.vtype.vma := Mux(illegal, 0.U, vtype.vma)
+  outVConfig.vtype.vlmul := Mux(illegal, 0.U, vtype.vlmul)
+  outVConfig.vtype.vsew := Mux(illegal, 0.U, vtype.vsew)
+
+  io.testOut.vlmax := vlmax
+  io.testOut.log2Vlmax := log2Vlmax
+}

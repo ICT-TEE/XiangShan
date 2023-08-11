@@ -4,50 +4,75 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import utility.DataHoldBypass
+import utils.OptionWrapper
 import xiangshan._
+import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.{FtqPtr, PreDecodeInfo}
 import xiangshan.backend.datapath.DataConfig._
+import xiangshan.backend.fu.vector.Bundles.Vxsat
 
-class FuncUnitInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
-  val fuOpType  = FuOpType()
+class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
+  val fuOpType    = FuOpType()
+  val robIdx      = new RobPtr
+  val pdest       = UInt(PhyRegIdxWidth.W)
+  val rfWen       = OptionWrapper(cfg.writeIntRf, Bool())
+  val fpWen       = OptionWrapper(cfg.writeFpRf,  Bool())
+  val vecWen      = OptionWrapper(cfg.writeVecRf, Bool())
+  val flushPipe   = OptionWrapper(cfg.flushPipe,  Bool())
+  val preDecode   = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
+  val ftqIdx      = OptionWrapper(cfg.needPc || cfg.replayInst, new FtqPtr)
+  val ftqOffset   = OptionWrapper(cfg.needPc || cfg.replayInst, UInt(log2Up(PredictWidth).W))
+  val predictInfo = OptionWrapper(cfg.hasRedirect, new Bundle {
+    val target    = UInt(VAddrData().dataWidth.W)
+    val taken     = Bool()
+  })
+  val fpu         = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals)
+  val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
+}
+
+class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
+  val robIdx        = new RobPtr
+  val pdest         = UInt(PhyRegIdxWidth.W) // Todo: use maximum of pregIdxWidth of different pregs
+  val rfWen         = OptionWrapper(cfg.writeIntRf, Bool())
+  val fpWen         = OptionWrapper(cfg.writeFpRf,  Bool())
+  val vecWen        = OptionWrapper(cfg.writeVecRf, Bool())
+  val exceptionVec  = OptionWrapper(cfg.exceptionOut.nonEmpty, ExceptionVec())
+  val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
+  val replay        = OptionWrapper(cfg.replayInst, Bool())
+  val preDecode     = OptionWrapper(cfg.hasPredecode, new PreDecodeInfo)
+  val fpu           = OptionWrapper(cfg.needFPUCtrl, new FPUCtrlSignals) // only used in FMA
+  val vpu           = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
+}
+
+class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val src       = MixedVec(cfg.genSrcDataVec)
   val imm       = UInt(cfg.dataBits.W)
-  val robIdx    = new RobPtr
-  val pdest     = UInt(PhyRegIdxWidth.W)
-  val rfWen     = if (cfg.writeIntRf)   Some(Bool())                        else None
-  val fpWen     = if (cfg.writeFpRf)    Some(Bool())                        else None
-  val vecWen    = if (cfg.writeVecRf)   Some(Bool())                        else None
-  val fpu       = if (cfg.needFPUCtrl)  Some(new FPUCtrlSignals)            else None
+  val pc        = OptionWrapper(cfg.needPc, UInt(VAddrData().dataWidth.W))
 
-  val flushPipe = if (cfg.flushPipe)    Some(Bool())                        else None
-  val pc        = if (cfg.needPc)       Some(UInt(VAddrData().dataWidth.W)) else None
-  val preDecode = if (cfg.hasPredecode) Some(new PreDecodeInfo)             else None
-  val ftqIdx    = if (cfg.needPc || cfg.replayInst)
-                                        Some(new FtqPtr)                    else None
-  val ftqOffset = if (cfg.needPc || cfg.replayInst)
-                                        Some(UInt(log2Up(PredictWidth).W))  else None
-  val predictInfo = if (cfg.hasRedirect)Some(new Bundle {
-    val target = UInt(VAddrData().dataWidth.W)
-    val taken = Bool()
-  }) else None
+  def getSrcVConfig : UInt = src(cfg.vconfigIdx)
+  def getSrcMask    : UInt = src(cfg.maskSrcIdx)
+}
+
+class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
+  val data      = UInt(cfg.dataBits.W)
+  val fflags    = OptionWrapper(cfg.writeFflags, UInt(5.W))
+  val vxsat     = OptionWrapper(cfg.writeVxsat, Vxsat())
+  val pc        = OptionWrapper(cfg.isFence, UInt(VAddrData().dataWidth.W))
+  val redirect  = OptionWrapper(cfg.hasRedirect, ValidIO(new Redirect))
+}
+
+class FuncUnitInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
+  val ctrl = new FuncUnitCtrlInput(cfg)
+  val data = new FuncUnitDataInput(cfg)
 }
 
 class FuncUnitOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
-  val data         = UInt(cfg.dataBits.W)
-  val pdest        = UInt(PhyRegIdxWidth.W) // Todo: use maximum of pregIdxWidth of different pregs
-  val robIdx       = new RobPtr
-  val redirect     = if (cfg.hasRedirect) Some(ValidIO(new Redirect))        else None
-  val fflags       = if (cfg.writeFflags) Some(UInt(5.W))                    else None
-  val exceptionVec = if (cfg.exceptionOut.nonEmpty) Some(ExceptionVec())     else None
-  val flushPipe    = if (cfg.flushPipe)   Some(Bool())                       else None
-  val replay       = if (cfg.replayInst)  Some(Bool())                       else None
-  val pc           = if (cfg.isFence)     Some(UInt(VAddrData().dataWidth.W))else None
-  val fpu          = if (cfg.needFPUCtrl) Some(new FPUCtrlSignals)           else None // only used in FMA
-  val preDecode    = if (cfg.hasPredecode)Some(new PreDecodeInfo)            else None
+  val ctrl = new FuncUnitCtrlOutput(cfg)
+  val res = new FuncUnitDataOutput(cfg)
 }
 
-class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends Bundle {
+class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
   val in = Flipped(DecoupledIO(new FuncUnitInput(cfg)))
   val out = DecoupledIO(new FuncUnitOutput(cfg))
@@ -56,16 +81,20 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends Bundle {
   val frm = if (cfg.needSrcFrm) Some(Input(UInt(3.W))) else None
 }
 
-abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends Module {
+abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule {
   val io = IO(new FuncUnitIO(cfg))
 
   // should only be used in non-piped fu
   def connectNonPipedCtrlSingal: Unit = {
-    io.out.bits.robIdx := DataHoldBypass(io.in.bits.robIdx, io.in.fire)
-    io.out.bits.pdest := DataHoldBypass(io.in.bits.pdest, io.in.fire)
-    io.out.bits.pc.foreach(_ := io.in.bits.pc.get)
-    io.out.bits.preDecode.foreach(_ := io.in.bits.preDecode.get)
-    io.out.bits.fpu.foreach(_ := DataHoldBypass(io.in.bits.fpu.get, io.in.fire))
+    io.out.bits.ctrl.robIdx := DataHoldBypass(io.in.bits.ctrl.robIdx, io.in.fire)
+    io.out.bits.ctrl.pdest  := DataHoldBypass(io.in.bits.ctrl.pdest, io.in.fire)
+    io.out.bits.ctrl.rfWen  .foreach(_ := DataHoldBypass(io.in.bits.ctrl.rfWen.get, io.in.fire))
+    io.out.bits.ctrl.fpWen  .foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpWen.get, io.in.fire))
+    io.out.bits.ctrl.vecWen .foreach(_ := DataHoldBypass(io.in.bits.ctrl.vecWen.get, io.in.fire))
+    // io.out.bits.ctrl.flushPipe should be connected in fu
+    io.out.bits.ctrl.preDecode.foreach(_ := DataHoldBypass(io.in.bits.ctrl.preDecode.get, io.in.fire))
+    io.out.bits.ctrl.fpu      .foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire))
+    io.out.bits.ctrl.vpu      .foreach(_ := DataHoldBypass(io.in.bits.ctrl.vpu.get, io.in.fire))
   }
 }
 
@@ -75,11 +104,15 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends Modul
 trait HasPipelineReg { this: FuncUnit =>
   def latency: Int
 
-  require(latency > 0)
+  require(latency >= 0)
 
   val validVec = io.in.valid +: Seq.fill(latency)(RegInit(false.B))
   val rdyVec = Seq.fill(latency)(Wire(Bool())) :+ io.out.ready
-  val robIdxVec = io.in.bits.robIdx +: Array.fill(latency)(Reg(chiselTypeOf(io.in.bits.robIdx)))
+  val ctrlVec = io.in.bits.ctrl +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.ctrl)))
+  val dataVec = io.in.bits.data +: Seq.fill(latency)(Reg(chiselTypeOf(io.in.bits.data)))
+
+  val robIdxVec = ctrlVec.map(_.robIdx)
+  val pcVec = dataVec.map(_.pc)
 
   // if flush(0), valid 0 will not given, so set flushVec(0) to false.B
   val flushVec = validVec.zip(robIdxVec).map(x => x._1 && x._2.needFlush(io.flush))
@@ -89,17 +122,19 @@ trait HasPipelineReg { this: FuncUnit =>
   }
 
   for (i <- 1 to latency) {
-    when(rdyVec(i - 1) && validVec(i - 1) && !flushVec(i - 1)){
+    when(rdyVec(i - 1) && validVec(i - 1) && !flushVec(i - 1)) {
       validVec(i) := validVec(i - 1)
-      robIdxVec(i) := robIdxVec(i - 1)
-    }.elsewhen(flushVec(i) || rdyVec(i)){
+      ctrlVec(i) := ctrlVec(i - 1)
+      dataVec(i) := dataVec(i - 1)
+    }.elsewhen(flushVec(i) || rdyVec(i)) {
       validVec(i) := false.B
     }
   }
 
-  io.in.ready := rdyVec(0)
+  io.in.ready := rdyVec.head
   io.out.valid := validVec.last
-  io.out.bits.robIdx := robIdxVec.last
+  io.out.bits.res.pc.zip(pcVec.last).foreach { case (l, r) => l := r }
+  io.out.bits.ctrl := ctrlVec.last
 
   def regEnable(i: Int): Bool = validVec(i - 1) && rdyVec(i - 1) && !flushVec(i - 1)
 
@@ -120,4 +155,7 @@ trait HasPipelineReg { this: FuncUnit =>
 
 }
 
-
+abstract class PipedFuncUnit(override val cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
+  with HasPipelineReg {
+  override def latency: Int = cfg.latency.latencyVal.get
+}

@@ -27,7 +27,7 @@ object ivys {
   val sv = "2.12.13"
   val chisel3 = ivy"edu.berkeley.cs::chisel3:3.5.0"
   val chisel3Plugin = ivy"edu.berkeley.cs:::chisel3-plugin:3.5.0"
-  val chiseltest = ivy"edu.berkeley.cs::chiseltest:0.3.2"
+  val chiseltest = ivy"edu.berkeley.cs::chiseltest:0.5.2"
   val chiselCirct = ivy"com.sifive::chisel-circt:0.6.0"
   val scalatest = ivy"org.scalatest::scalatest:3.2.2"
   val macroParadise = ivy"org.scalamacros:::paradise:2.1.1"
@@ -99,7 +99,7 @@ object rocketchip extends `rocket-chip`.common.CommonRocketChip {
     def chisel3IvyDeps = if(chisel3Module.isEmpty) Agg(
       common.getVersion("chisel3")
     ) else Agg.empty[Dep]
-    
+
     def chisel3PluginIvyDeps = Agg(common.getVersion("chisel3-plugin", cross=true))
   }
 
@@ -115,6 +115,17 @@ object huancun extends XSModule with SbtModule {
 
   override def moduleDeps = super.moduleDeps ++ Seq(
     rocketchip,
+    utility
+  )
+}
+
+object coupledL2 extends XSModule with SbtModule {
+
+  override def millSourcePath = os.pwd / "coupledL2"
+
+  override def moduleDeps = super.moduleDeps ++ Seq(
+    rocketchip,
+    huancun,
     utility
   )
 }
@@ -145,13 +156,18 @@ trait CommonXiangShan extends XSModule with SbtModule { m =>
   def rocketModule: PublishModule
   def difftestModule: PublishModule
   def huancunModule: PublishModule
+  def coupledL2Module: PublishModule
   def yunsuanModule: PublishModule
   def fudianModule: PublishModule
   def utilityModule: PublishModule
 
   override def millSourcePath = os.pwd
 
-  override def forkArgs = Seq("-Xmx128G", "-Xss256m")
+  override def forkArgs = Seq("-Xmx64G", "-Xss256m")
+
+  val resourcesPATH = os.pwd.toString() + "/src/main/resources"
+  val envPATH = sys.env("PATH") + ":" + resourcesPATH
+  override def forkEnv = Map("PATH" -> envPATH)
 
   override def ivyDeps = super.ivyDeps() ++ Seq(ivys.chiseltest)
 
@@ -159,6 +175,7 @@ trait CommonXiangShan extends XSModule with SbtModule { m =>
     rocketModule,
     difftestModule,
     huancunModule,
+    coupledL2Module,
     yunsuanModule,
     fudianModule,
     utilityModule
@@ -167,6 +184,8 @@ trait CommonXiangShan extends XSModule with SbtModule { m =>
   object test extends Tests with TestModule.ScalaTest {
 
     override def forkArgs = m.forkArgs
+
+    override def forkEnv = m.forkEnv
 
     override def ivyDeps = super.ivyDeps() ++ Agg(
       ivys.scalatest
@@ -180,6 +199,7 @@ object XiangShan extends CommonXiangShan {
   override def rocketModule = rocketchip
   override def difftestModule = difftest
   override def huancunModule = huancun
+  override def coupledL2Module = coupledL2
   override def yunsuanModule = yunsuan
   override def fudianModule = fudian
   override def utilityModule = utility

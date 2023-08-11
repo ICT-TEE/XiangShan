@@ -30,9 +30,20 @@ import xiangshan.backend.issue.{IntScheduler, IssueBlockParams, MemScheduler, Sc
 import xiangshan.backend.regfile.{IntPregParams, PregParams, VfPregParams}
 import xiangshan.backend.BackendParams
 import xiangshan.cache.DCacheParameters
+import xiangshan.cache.prefetch._
+import xiangshan.frontend.{BasePredictor, BranchPredictionResp, FTB, FakePredictor, RAS, Tage, ITTage, Tage_SC, FauFTB}
+import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.cache.mmu.{L2TLBParameters, TLBParameters}
 import xiangshan.frontend._
 import xiangshan.frontend.icache.ICacheParameters
+
+import freechips.rocketchip.diplomacy.AddressSet
+import system.SoCParamsKey
+import huancun._
+import huancun.debug._
+import coupledL2._
+import xiangshan.backend.datapath.WakeUpConfig
+import xiangshan.mem.prefetch.{PrefetcherParams, SMSParams}
 
 import scala.math.min
 
@@ -46,6 +57,7 @@ case class XSCoreParameters
   HartId: Int = 0,
   XLEN: Int = 64,
   VLEN: Int = 128,
+  ELEN: Int = 64,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
   HasDiv: Boolean = true,
@@ -70,6 +82,7 @@ case class XSCoreParameters
   UbtbGHRLength: Int = 4,
   // HistoryLength: Int = 512,
   EnableGHistDiff: Boolean = true,
+  EnableCommitGHistDiff: Boolean = true,
   UbtbSize: Int = 256,
   FtbSize: Int = 2048,
   RasSize: Int = 32,
@@ -129,17 +142,28 @@ case class XSCoreParameters
   DecodeWidth: Int = 6,
   RenameWidth: Int = 6,
   CommitWidth: Int = 6,
+  MaxUopSize: Int = 65,
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
+  IntLogicRegs: Int = 32,
+  FpLogicRegs: Int = 33,
+  VecLogicRegs: Int = 32 + 1 + 15, // 15: tmp, 1: vconfig
+  VCONFIG_IDX: Int = 32,
   NRPhyRegs: Int = 192,
-  IntPhyRegs: Int = 192,
-  VfPhyRegs: Int = 192,
-  LoadQueueSize: Int = 80,
-  LoadQueueNWriteBanks: Int = 8,
+  VirtualLoadQueueSize: Int = 80,
+  LoadQueueRARSize: Int = 80,
+  LoadQueueRAWSize: Int = 64, // NOTE: make sure that LoadQueueRAWSize is power of 2.
+  RollbackGroupSize: Int = 8,
+  LoadQueueReplaySize: Int = 80,
+  LoadUncacheBufferSize: Int = 20,
+  LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
   StoreQueueSize: Int = 64,
-  StoreQueueNWriteBanks: Int = 8,
+  StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
+  StoreQueueForwardWithMask: Boolean = true,
   VlsQueueSize: Int = 8,
   RobSize: Int = 256,
+  RabSize: Int = 256,
+  IssueQueueSize: Int = 32,
   dpParams: DispatchParameters = DispatchParameters(
     IntDqSize = 16,
     FpDqSize = 16,
@@ -149,15 +173,16 @@ case class XSCoreParameters
     LsDqDeqWidth = 6,
   ),
   intPreg: PregParams = IntPregParams(
-    numEntries = 64,
-    numRead = 14,
-    numWrite = 8,
+    numEntries = 192,
+    numRead = None,
+    numWrite = None,
   ),
   vfPreg: VfPregParams = VfPregParams(
-    numEntries = 64,
-    numRead = 14,
-    numWrite = 8,
+    numEntries = 192,
+    numRead = None,
+    numWrite = None,
   ),
+  prefetcher: Option[PrefetcherParams] = Some(SMSParams()),
   LoadPipelineWidth: Int = 2,
   StorePipelineWidth: Int = 2,
   VecMemSrcInWidth: Int = 2,
@@ -174,9 +199,9 @@ case class XSCoreParameters
   EnableCacheErrorAfterReset: Boolean = true,
   EnableDCacheWPU: Boolean = false,
   EnableAccurateLoadError: Boolean = true,
-  EnableUncacheWriteOutstanding: Boolean = true,
+  EnableUncacheWriteOutstanding: Boolean = false,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
-  ReSelectLen: Int = 6, // load replay queue replay select counter len
+  ReSelectLen: Int = 7, // load replay queue replay select counter len
   itlbParameters: TLBParameters = TLBParameters(
     name = "itlb",
     fetchi = true,
@@ -186,6 +211,8 @@ case class XSCoreParameters
     superNWays = 4,
     superReplacer = Some("plru")
   ),
+  itlbPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
+  ipmpPortNum: Int = 2 + ICacheParameters().prefetchPipeNum + 1,
   ldtlbParameters: TLBParameters = TLBParameters(
     name = "ldtlb",
     normalNSets = 64,
@@ -212,6 +239,19 @@ case class XSCoreParameters
     outsideRecvFlush = true,
     saveLevel = true
   ),
+  pftlbParameters: TLBParameters = TLBParameters(
+    name = "pftlb",
+    normalNSets = 64,
+    normalNWays = 1,
+    normalAssociative = "sa",
+    normalReplacer = Some("setplru"),
+    superNWays = 16,
+    normalAsVictim = true,
+    outReplace = false,
+    partialStaticPMP = true,
+    outsideRecvFlush = true,
+    saveLevel = true
+  ),
   refillBothTlb: Boolean = false,
   btlbParameters: TLBParameters = TLBParameters(
     name = "btlb",
@@ -227,7 +267,8 @@ case class XSCoreParameters
     replacer = Some("setplru"),
     nMissEntries = 2,
     nProbeEntries = 2,
-    nPrefetchEntries = 2,
+    nPrefetchEntries = 12,
+    nPrefBufferEntries = 64,
     hasPrefetch = true,
   ),
   dcacheParametersOpt: Option[DCacheParameters] = Some(DCacheParameters(
@@ -238,94 +279,100 @@ case class XSCoreParameters
     nProbeEntries = 8,
     nReleaseEntries = 18
   )),
-  L2CacheParamsOpt: Option[HCCacheParameters] = Some(HCCacheParameters(
+  L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
     name = "l2",
-    level = 2,
     ways = 8,
     sets = 1024, // default 512KB L2
-    prefetch = Some(huancun.prefetch.BOPParameters())
+    prefetch = Some(coupledL2.prefetch.PrefetchReceiverParams())
   )),
   L2NBanks: Int = 1,
   usePTWRepeater: Boolean = false,
-  softPTW: Boolean = false, // dpi-c debug only
+  softTLB: Boolean = false, // dpi-c l1tlb debug only
+  softPTW: Boolean = false, // dpi-c l2tlb debug only
   softPTWDelay: Int = 1
 ){
+  def vlWidth = log2Up(VLEN) + 1
+
   val allHistLens = SCHistLens ++ ITTageTableInfos.map(_._2) ++ TageTableInfos.map(_._2) :+ UbtbGHRLength
   val HistoryLength = allHistLens.max + numBr * FtqSize + 9 // 256 for the predictor configs now
 
-  def intSchdParams = {
+  val intSchdParams = {
     implicit val schdType: SchedulerType = IntScheduler()
-    val pregBits = intPreg.addrWidth
-    val numRfRead = intPreg.numRead
-    val numRfWrite = intPreg.numWrite
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(0, 2)), Seq(IntRD(1, 2)))),
-        ExeUnitParams(Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(0, 1)), Seq(IntRD(1, 1)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+        ExeUnitParams("ALU0", Seq(AluCfg), Seq(IntWB(port = 0, 0)), Seq(Seq(IntRD(2, 0)), Seq(IntRD(8, 0)))),
+        ExeUnitParams("ALU1", Seq(AluCfg), Seq(IntWB(port = 1, 0)), Seq(Seq(IntRD(3, 0)), Seq(IntRD(9, 0)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(DivCfg), Seq(IntWB(port = 2, 0)), Seq(Seq(IntRD(4, 0)), Seq(IntRD(5, 0)))),
-        ExeUnitParams(Seq(DivCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(6, 0)), Seq(IntRD(7, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+        ExeUnitParams("MUL0", Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 2, 0)), Seq(Seq(IntRD(4, 0)), Seq(IntRD(10, 0)))),
+        ExeUnitParams("MUL1", Seq(AluCfg, MulCfg, BkuCfg), Seq(IntWB(port = 3, 0)), Seq(Seq(IntRD(5, 0)), Seq(IntRD(11, 0)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(BrhCfg, JmpCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 4, 0)), Seq(Seq(IntRD(4, 1)), Seq(IntRD(5, 1)))),
-        ExeUnitParams(Seq(BrhCfg), Seq(), Seq(Seq(IntRD(6, 1)), Seq(IntRD(7, 1)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2),
+        ExeUnitParams("BJU0", Seq(AluCfg, BrhCfg, JmpCfg), Seq(IntWB(port = 4, 0)), Seq(Seq(IntRD(0, 0)), Seq(IntRD(6, 0)))),
+        ExeUnitParams("BJU1", Seq(AluCfg, BrhCfg), Seq(IntWB(port = 5, 0)), Seq(Seq(IntRD(1, 1)), Seq(IntRD(7, 1)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(I2fCfg), Seq(VecWB(port = 6, Int.MaxValue)), Seq(Seq(IntRD(0, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 2)
+        ExeUnitParams("IMISC0", Seq(I2fCfg, VSetRiWvfCfg), Seq(VfWB(4, 0)), Seq(Seq(IntRD(6, 1)), Seq(IntRD(12, 1)))),
+        ExeUnitParams("IMISC1", Seq(DivCfg, VSetRiWiCfg, CsrCfg, FenceCfg), Seq(IntWB(port = 6, 0)), Seq(Seq(IntRD(10, Int.MaxValue)), Seq(IntRD(13, Int.MaxValue)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
     ),
       numPregs = intPreg.numEntries,
-      numRfReadWrite = Some((numRfRead, numRfWrite)),
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = intPreg.dataCfg.dataWidth,
       numUopIn = dpParams.IntDqDeqWidth,
     )
   }
-  def vfSchdParams = {
+  val vfSchdParams = {
     implicit val schdType: SchedulerType = VfScheduler()
-    val pregBits = vfPreg.addrWidth
-    val numRfRead = vfPreg.numRead
-    val numRfWrite = vfPreg.numWrite
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(FmacCfg), Seq(VecWB(port = 0, 0)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)))),
-        ExeUnitParams(Seq(FmacCfg), Seq(VecWB(port = 1, 0)), Seq(Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
+        ExeUnitParams("FEX0", Seq(FmacCfg), Seq(VfWB(port = 0, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)))),
+        ExeUnitParams("FEX1", Seq(FmacCfg), Seq(VfWB(port = 1, 0)), Seq(Seq(VfRD(4, 0)), Seq(VfRD(5, 0)), Seq(VfRD(6, 0)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(F2fCfg, F2iCfg, FDivSqrtCfg), Seq(VecWB(port = 2, 0), IntWB(port = 7, 0)), Seq(Seq(VfRD(6, 0)), Seq(VfRD(7, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = numRfWrite, numEnq = 4),
+        ExeUnitParams("FEX2", Seq(FDivSqrtCfg), Seq(VfWB(port = 2, 0)), Seq(Seq(VfRD(11, 0)), Seq(VfRD(12, 0)))),
+        ExeUnitParams("FEX3", Seq(F2fCfg, F2iCfg, VSetRvfWvfCfg), Seq(VfWB(port = 3, 0), IntWB(port = 7, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
+      IssueBlockParams(Seq(
+        ExeUnitParams("VEX0", Seq(VialuCfg, VimacCfg, VppuCfg, VipuCfg), Seq(VfWB(port = 4, 0)), Seq(Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)), Seq(VfRD(5, 0)))),
+        ExeUnitParams("VEX1", Seq(VfaluCfg, VfmaCfg), Seq(VfWB(port = 5, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
+      ), numEntries = 8, numEnq = 2),
+      IssueBlockParams(Seq(
+        ExeUnitParams("VEX3", Seq(VfdivCfg), Seq(VfWB(port = 5, 0)), Seq(Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)), Seq(VfRD(10, 0)), Seq(VfRD(11, 0)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
     ),
       numPregs = vfPreg.numEntries,
-      numRfReadWrite = Some((numRfRead, numRfWrite)),
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = vfPreg.dataCfg.dataWidth,
       numUopIn = dpParams.FpDqDeqWidth,
     )
   }
-  def memSchdParams = {
+
+  val memSchdParams = {
     implicit val schdType: SchedulerType = MemScheduler()
-    val pregBits = vfPreg.addrWidth max intPreg.addrWidth
     val rfDataWidth = 64
 
     SchdBlockParams(Seq(
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(LduCfg), Seq(IntWB(5, 0), VecWB(4, 0)), Seq(Seq(IntRD(8, 0)))),
-        ExeUnitParams(Seq(LduCfg), Seq(IntWB(6, 0), VecWB(5, 0)), Seq(Seq(IntRD(9, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
+        ExeUnitParams("LDU0", Seq(LduCfg), Seq(IntWB(6, 0), VfWB(6, 0)), Seq(Seq(IntRD(12, 0)))),
+        ExeUnitParams("LDU1", Seq(LduCfg), Seq(IntWB(7, 0), VfWB(7, 0)), Seq(Seq(IntRD(13, 0)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(StaCfg), Seq(), Seq(Seq(IntRD(10, 0)))),
-        ExeUnitParams(Seq(StaCfg), Seq(), Seq(Seq(IntRD(11, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
+        ExeUnitParams("STA0", Seq(StaCfg, MouCfg), Seq(IntWB(1, 1)), Seq(Seq(IntRD(8, 0)))),
+        ExeUnitParams("STA1", Seq(StaCfg, MouCfg), Seq(IntWB(3, 1)), Seq(Seq(IntRD(9, 0)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
       IssueBlockParams(Seq(
-        ExeUnitParams(Seq(StdCfg), Seq(), Seq(Seq(IntRD(12, 0), VfRD(12, 0)))),
-        ExeUnitParams(Seq(StdCfg), Seq(), Seq(Seq(IntRD(13, 0), VfRD(13, 0)))),
-      ), numEntries = 8, pregBits = pregBits, numWakeupFromWB = 16, numEnq = 2),
+        ExeUnitParams("STD0", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(7, Int.MaxValue), VfRD(12, Int.MaxValue)))),
+        ExeUnitParams("STD1", Seq(StdCfg, MoudCfg), Seq(), Seq(Seq(IntRD(6, Int.MaxValue), VfRD(10, Int.MaxValue)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
+      IssueBlockParams(Seq(
+        ExeUnitParams("VLDU0", Seq(VlduCfg), Seq(VfWB(6, 1)), Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(VfRD(3, 0)), Seq(VfRD(4, 0)))),
+        ExeUnitParams("VLDU1", Seq(VlduCfg), Seq(VfWB(7, 1)), Seq(Seq(VfRD(5, 0)), Seq(VfRD(6, 0)), Seq(VfRD(7, 0)), Seq(VfRD(8, 0)), Seq(VfRD(9, 0)))),
+      ), numEntries = IssueQueueSize, numEnq = 2),
     ),
       numPregs = intPreg.numEntries max vfPreg.numEntries,
-      numRfReadWrite = None,
       numDeqOutside = 0,
       schdType = schdType,
       rfDataWidth = rfDataWidth,
@@ -333,14 +380,88 @@ case class XSCoreParameters
     )
   }
 
-  def backendParams: BackendParams = backend.BackendParams(Map(
-    IntScheduler() -> intSchdParams,
-    VfScheduler() -> vfSchdParams,
-    MemScheduler() -> memSchdParams,
-  ), Seq(
-    intPreg,
-    vfPreg,
-  ))
+  def PregIdxWidthMax = intPreg.addrWidth max vfPreg.addrWidth
+
+  def iqWakeUpParams = {
+    Seq(
+      WakeUpConfig("ALU0" -> "ALU0"),
+      WakeUpConfig("ALU0" -> "ALU1"),
+      WakeUpConfig("ALU0" -> "MUL0"),
+      WakeUpConfig("ALU0" -> "MUL1"),
+      WakeUpConfig("ALU1" -> "ALU0"),
+      WakeUpConfig("ALU1" -> "ALU1"),
+      WakeUpConfig("ALU0" -> "BJU0"),
+      WakeUpConfig("ALU0" -> "BJU1"),
+      WakeUpConfig("ALU1" -> "BJU0"),
+      WakeUpConfig("ALU1" -> "BJU1"),
+      WakeUpConfig("ALU0" -> "LDU0"),
+      WakeUpConfig("ALU0" -> "LDU1"),
+      WakeUpConfig("ALU1" -> "LDU0"),
+      WakeUpConfig("ALU1" -> "LDU1"),
+      WakeUpConfig("ALU0" -> "STA0"),
+      WakeUpConfig("ALU0" -> "STA1"),
+      WakeUpConfig("ALU1" -> "STA0"),
+      WakeUpConfig("ALU1" -> "STA1"),
+      WakeUpConfig("MUL0" -> "ALU0"),
+      WakeUpConfig("MUL0" -> "ALU1"),
+      WakeUpConfig("MUL0" -> "MUL0"),
+      WakeUpConfig("MUL0" -> "MUL1"),
+      WakeUpConfig("MUL1" -> "ALU0"),
+      WakeUpConfig("MUL1" -> "ALU1"),
+      WakeUpConfig("MUL0" -> "BJU0"),
+      WakeUpConfig("MUL0" -> "BJU1"),
+      WakeUpConfig("MUL1" -> "BJU0"),
+      WakeUpConfig("MUL1" -> "BJU1"),
+      WakeUpConfig("MUL0" -> "LDU0"),
+      WakeUpConfig("MUL0" -> "LDU1"),
+      WakeUpConfig("MUL1" -> "LDU0"),
+      WakeUpConfig("MUL1" -> "LDU1"),
+      WakeUpConfig("MUL0" -> "STA0"),
+      WakeUpConfig("MUL0" -> "STA1"),
+      WakeUpConfig("MUL1" -> "STA0"),
+      WakeUpConfig("MUL1" -> "STA1"),
+      WakeUpConfig("BJU0" -> "ALU0"),
+      WakeUpConfig("BJU0" -> "ALU1"),
+      WakeUpConfig("BJU0" -> "MUL0"),
+      WakeUpConfig("BJU0" -> "MUL1"),
+      WakeUpConfig("BJU1" -> "ALU0"),
+      WakeUpConfig("BJU1" -> "ALU1"),
+      WakeUpConfig("BJU0" -> "BJU0"),
+      WakeUpConfig("BJU0" -> "BJU1"),
+      WakeUpConfig("BJU1" -> "BJU0"),
+      WakeUpConfig("BJU1" -> "BJU1"),
+      WakeUpConfig("BJU0" -> "LDU0"),
+      WakeUpConfig("BJU0" -> "LDU1"),
+      WakeUpConfig("BJU1" -> "LDU0"),
+      WakeUpConfig("BJU1" -> "LDU1"),
+      WakeUpConfig("BJU0" -> "STA0"),
+      WakeUpConfig("BJU0" -> "STA1"),
+      WakeUpConfig("BJU1" -> "STA0"),
+      WakeUpConfig("BJU1" -> "STA1"),
+      WakeUpConfig("IMISC0" -> "FEX0"),
+      WakeUpConfig("IMISC0" -> "FEX1"),
+      WakeUpConfig("IMISC0" -> "FEX2"),
+      WakeUpConfig("IMISC0" -> "FEX3"),
+      WakeUpConfig("IMISC0" -> "FEX4"),
+      WakeUpConfig("FEX3" -> "FEX0"),
+      WakeUpConfig("FEX3" -> "FEX1"),
+      WakeUpConfig("FEX3" -> "FEX2"),
+      WakeUpConfig("FEX3" -> "FEX3"),
+    )
+  }
+
+  def backendParams: BackendParams = backend.BackendParams(
+    Map(
+      IntScheduler() -> intSchdParams,
+      VfScheduler() -> vfSchdParams,
+      MemScheduler() -> memSchdParams,
+    ),
+    Seq(
+      intPreg,
+      vfPreg,
+    ),
+    iqWakeUpParams,
+  )
 }
 
 case object DebugOptionsKey extends Field[DebugOptions]
@@ -353,6 +474,7 @@ case class DebugOptions
   EnableDebug: Boolean = false,
   EnablePerfDebug: Boolean = true,
   UseDRAMSim: Boolean = false,
+  EnableConstantin: Boolean = false,
   EnableTopDown: Boolean = false
 )
 
@@ -367,6 +489,7 @@ trait HasXSParameter {
 
   val XLEN = coreParams.XLEN
   val VLEN = coreParams.VLEN
+  val ELEN = coreParams.ELEN
   val minFLen = 32
   val fLen = 64
   def xLen = XLEN
@@ -397,6 +520,7 @@ trait HasXSParameter {
   val EnbaleTlbDebug = coreParams.EnbaleTlbDebug
   val HistoryLength = coreParams.HistoryLength
   val EnableGHistDiff = coreParams.EnableGHistDiff
+  val EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
   val UbtbGHRLength = coreParams.UbtbGHRLength
   val UbtbSize = coreParams.UbtbSize
   val EnableFauFTB = coreParams.EnableFauFTB
@@ -451,20 +575,29 @@ trait HasXSParameter {
   val DecodeWidth = coreParams.DecodeWidth
   val RenameWidth = coreParams.RenameWidth
   val CommitWidth = coreParams.CommitWidth
+  val MaxUopSize = coreParams.MaxUopSize
   val FtqSize = coreParams.FtqSize
   val EnableLoadFastWakeUp = coreParams.EnableLoadFastWakeUp
-  val NRPhyRegs = coreParams.NRPhyRegs
-  val PhyRegIdxWidth = log2Up(NRPhyRegs)
-  val IntPhyRegs = coreParams.IntPhyRegs
-  val VfPhyRegs = coreParams.VfPhyRegs
-  val IntPregIdxWidth = log2Up(IntPhyRegs)
-  val VfPregIdxWidth = log2Up(VfPhyRegs)
+  val IntLogicRegs = coreParams.IntLogicRegs
+  val FpLogicRegs = coreParams.FpLogicRegs
+  val VecLogicRegs = coreParams.VecLogicRegs
+  val VCONFIG_IDX = coreParams.VCONFIG_IDX
+  val IntPhyRegs = coreParams.intPreg.numEntries
+  val VfPhyRegs = coreParams.vfPreg.numEntries
+  val PhyRegIdxWidth = log2Up(IntPhyRegs) max log2Up(VfPhyRegs)
   val RobSize = coreParams.RobSize
+  val RabSize = coreParams.RabSize
   val IntRefCounterWidth = log2Ceil(RobSize)
-  val LoadQueueSize = coreParams.LoadQueueSize
+  val VirtualLoadQueueSize = coreParams.VirtualLoadQueueSize
+  val LoadQueueRARSize = coreParams.LoadQueueRARSize
+  val LoadQueueRAWSize = coreParams.LoadQueueRAWSize
+  val RollbackGroupSize = coreParams.RollbackGroupSize
+  val LoadQueueReplaySize = coreParams.LoadQueueReplaySize
+  val LoadUncacheBufferSize = coreParams.LoadUncacheBufferSize
   val LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
   val StoreQueueSize = coreParams.StoreQueueSize
   val StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
+  val StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
   val VlsQueueSize = coreParams.VlsQueueSize
   val dpParams = coreParams.dpParams
 
@@ -494,6 +627,7 @@ trait HasXSParameter {
   val itlbParams = coreParams.itlbParameters
   val ldtlbParams = coreParams.ldtlbParameters
   val sttlbParams = coreParams.sttlbParameters
+  val pftlbParams = coreParams.pftlbParameters
   val btlbParams = coreParams.btlbParameters
   val l2tlbParams = coreParams.l2tlbParameters
   val NumPerfCounters = coreParams.NumPerfCounters
@@ -526,6 +660,7 @@ trait HasXSParameter {
   val SSIDWidth = log2Up(LFSTSize)
   val LFSTWidth = 4
   val StoreSetEnable = true // LWT will be disabled if SS is enabled
+  val LFSTEnable = false
 
   val PCntIncrStep: Int = 6
   val numPCntHc: Int = 25
@@ -535,4 +670,7 @@ trait HasXSParameter {
   val numCSRPCntCtrl     = 8
   val numCSRPCntLsu      = 8
   val numCSRPCntHc       = 5
+
+  // source stages of cancel signal to issue queues
+  val cancelStages = Seq("IS", "OG0", "OG1")
 }

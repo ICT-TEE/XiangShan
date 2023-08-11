@@ -4,10 +4,36 @@ import chipsalliance.rocketchip.config.Parameters
 import chisel3._
 import chisel3.util._
 import difftest.{DifftestFpWriteback, DifftestIntWriteback}
+import utils.XSError
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{ExuOutput, WriteBackBundle}
+import xiangshan.backend.datapath.DataConfig.{IntData, VecData}
 import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.{Redirect, XSBundle, XSModule}
+
+class WbArbiterDispatcherIO[T <: Data](private val gen: T, n: Int) extends Bundle {
+  val in = Flipped(DecoupledIO(gen))
+
+  val out = Vec(n, DecoupledIO(gen))
+}
+
+class WbArbiterDispatcher[T <: Data](private val gen: T, n: Int, acceptCond: T => Seq[Bool])
+                           (implicit p: Parameters)
+  extends Module {
+
+  val io = IO(new WbArbiterDispatcherIO(gen, n))
+
+  private val acceptVec: Vec[Bool] = VecInit(acceptCond(io.in.bits))
+
+  XSError(io.in.valid && PopCount(acceptVec) > 1.U, s"[ExeUnit] accept vec should no more than 1, ${Binary(acceptVec.asUInt)} ")
+
+  io.out.zipWithIndex.foreach { case (out, i) =>
+    out.valid := acceptVec(i) && io.in.valid
+    out.bits := io.in.bits
+  }
+
+  io.in.ready := Cat(io.out.zip(acceptVec).map{ case(out, canAccept) => out.ready && canAccept}).orR
+}
 
 class WbArbiterIO()(implicit p: Parameters, params: WbArbiterParams) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
@@ -24,7 +50,7 @@ class WbArbiter(params: WbArbiterParams)(implicit p: Parameters) extends XSModul
 
   private val arbiters: Seq[Option[Arbiter[WriteBackBundle]]] = Seq.tabulate(params.numOut) { x => {
     if (inGroup.contains(x)) {
-      Some(Module(new Arbiter(new WriteBackBundle(inGroup.values.head.head.bits.params), inGroup(x).length)))
+      Some(Module(new Arbiter(new WriteBackBundle(inGroup.values.head.head.bits.params, backendParams), inGroup(x).length)))
     } else {
       None
     }
@@ -67,10 +93,10 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBu
 
   val fromMemExu: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = Flipped(params.memSchdParams.get.genExuOutputDecoupledBundle)
 
-  val toIntPreg = Flipped(MixedVec(Vec(params.intPregParams.numWrite,
+  val toIntPreg = Flipped(MixedVec(Vec(params.numPregWb(IntData()),
     new RfWritePortWithConfig(params.intPregParams.dataCfg, params.intPregParams.addrWidth))))
 
-  val toVfPreg = Flipped(MixedVec(Vec(params.vfPregParams.numWrite,
+  val toVfPreg = Flipped(MixedVec(Vec(params.numPregWb(VecData()),
     new RfWritePortWithConfig(params.vfPregParams.dataCfg, params.vfPregParams.addrWidth))))
 
   val toCtrlBlock = new Bundle {
@@ -82,8 +108,37 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
   val io = IO(new WbDataPathIO()(p, params))
 
   // alias
-  val intArbiterInputs = (io.fromIntExu ++ io.fromVfExu ++ io.fromMemExu).flatten.filter(_.bits.params.writeIntRf)
-  val vfArbiterInputs = (io.fromIntExu ++ io.fromVfExu ++ io.fromMemExu).flatten.filter(_.bits.params.writeVfRf)
+  val fromExu = (io.fromIntExu ++ io.fromVfExu ++ io.fromMemExu).flatten
+  val intArbiterInputsWire = WireInit(MixedVecInit(fromExu))
+  val intArbiterInputsWireY = intArbiterInputsWire.filter(_.bits.params.writeIntRf)
+  val intArbiterInputsWireN = intArbiterInputsWire.filterNot(_.bits.params.writeIntRf)
+  val vfArbiterInputsWire = WireInit(MixedVecInit(fromExu))
+  val vfArbiterInputsWireY = vfArbiterInputsWire.filter(_.bits.params.writeVfRf)
+  val vfArbiterInputsWireN = vfArbiterInputsWire.filterNot(_.bits.params.writeVfRf)
+
+  def acceptCond(exuOutput: ExuOutput): Seq[Bool] = {
+    val intWen = if(exuOutput.intWen.isDefined) exuOutput.intWen.get else false.B
+    val fpwen  = if(exuOutput.fpWen.isDefined) exuOutput.fpWen.get else false.B
+    val vecWen = if(exuOutput.vecWen.isDefined) exuOutput.vecWen.get else false.B
+    Seq(intWen, fpwen || vecWen)
+  }
+
+  fromExu.zip(intArbiterInputsWire.zip(vfArbiterInputsWire))map{
+    case (exuOut, (intArbiterInput, vfArbiterInput)) =>
+      val regfilesTypeNum = params.pregParams.size
+      val in1ToN = Module(new WbArbiterDispatcher(new ExuOutput(exuOut.bits.params), regfilesTypeNum, acceptCond))
+      in1ToN.io.in.valid := exuOut.valid
+      in1ToN.io.in.bits := exuOut.bits
+      exuOut.ready := in1ToN.io.in.ready
+      in1ToN.io.out.zip(MixedVecInit(intArbiterInput, vfArbiterInput)).foreach { case (source, sink) =>
+        sink.valid := source.valid
+        sink.bits := source.bits
+        source.ready := sink.ready
+      }
+  }
+  intArbiterInputsWireN.foreach(_.ready := false.B)
+  vfArbiterInputsWireN.foreach(_.ready := false.B)
+
   println(s"[WbDataPath] write int preg: " +
     s"IntExu(${io.fromIntExu.flatten.count(_.bits.params.writeIntRf)}) " +
     s"VfExu(${io.fromVfExu.flatten.count(_.bits.params.writeIntRf)}) " +
@@ -103,18 +158,18 @@ class WbDataPath(params: BackendParams)(implicit p: Parameters) extends XSModule
 
   // module assign
   intWbArbiter.io.flush <> io.flush
-  require(intWbArbiter.io.in.size == intArbiterInputs.size, s"intWbArbiter input size: ${intWbArbiter.io.in.size}, all vf wb size: ${intArbiterInputs.size}")
-  intWbArbiter.io.in.zip(intArbiterInputs).foreach { case (arbiterIn, in) =>
-    arbiterIn.valid := in.valid
+  require(intWbArbiter.io.in.size == intArbiterInputsWireY.size, s"intWbArbiter input size: ${intWbArbiter.io.in.size}, all vf wb size: ${intArbiterInputsWireY.size}")
+  intWbArbiter.io.in.zip(intArbiterInputsWireY).foreach { case (arbiterIn, in) =>
+    arbiterIn.valid := in.valid && in.bits.intWen.get
     in.ready := arbiterIn.ready
     arbiterIn.bits.fromExuOutput(in.bits)
   }
   private val intWbArbiterOut = intWbArbiter.io.out
 
   vfWbArbiter.io.flush <> io.flush
-  require(vfWbArbiter.io.in.size == vfArbiterInputs.size, s"vfWbArbiter input size: ${vfWbArbiter.io.in.size}, all vf wb size: ${vfArbiterInputs.size}")
-  vfWbArbiter.io.in.zip(vfArbiterInputs).foreach { case (arbiterIn, in) =>
-    arbiterIn.valid := in.valid
+  require(vfWbArbiter.io.in.size == vfArbiterInputsWireY.size, s"vfWbArbiter input size: ${vfWbArbiter.io.in.size}, all vf wb size: ${vfArbiterInputsWireY.size}")
+  vfWbArbiter.io.in.zip(vfArbiterInputsWireY).foreach { case (arbiterIn, in) =>
+    arbiterIn.valid := in.valid && (in.bits.fpWen.getOrElse(false.B) || in.bits.vecWen.getOrElse(false.B))
     in.ready := arbiterIn.ready
     arbiterIn.bits.fromExuOutput(in.bits)
   }

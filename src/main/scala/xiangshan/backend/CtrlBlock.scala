@@ -14,7 +14,7 @@
 * See the Mulan PSL v2 for more details.
 ***************************************************************************************/
 
-package xiangshan.backend.ctrlblock
+package xiangshan.backend
 
 import chipsalliance.rocketchip.config.Parameters
 import chisel3._
@@ -24,12 +24,13 @@ import utility._
 import utils._
 import xiangshan.ExceptionNO._
 import xiangshan._
-import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, ExceptionInfo, ExuOutput}
+import xiangshan.backend.ctrlblock.{MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
 import xiangshan.backend.dispatch.{Dispatch, DispatchQueue}
 import xiangshan.backend.fu.PFEvent
+import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.{Rename, RenameTableWrapper}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobLsqIO}
 import xiangshan.frontend.{FtqRead, Ftq_RF_Components}
@@ -166,7 +167,7 @@ class CtrlBlockImp(
   for (i <- 0 until CommitWidth) {
     // why flushOut: instructions with flushPipe are not commited to frontend
     // If we commit them to frontend, it will cause flush after commit, which is not acceptable by frontend.
-    val s1_isCommit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && rob.io.commits.info(i).uopIdx.andR && !s0_robFlushRedirect.valid
+    val s1_isCommit = rob.io.commits.commitValid(i) && rob.io.commits.isCommit && !s0_robFlushRedirect.valid
     io.frontend.toFtq.rob_commits(i).valid := RegNext(s1_isCommit)
     io.frontend.toFtq.rob_commits(i).bits := RegEnable(rob.io.commits.info(i), s1_isCommit)
   }
@@ -226,6 +227,22 @@ class CtrlBlockImp(
     XSPerfAccumulate("ldReplay_bubble_cycles", ldReplay_bubble_cycles)
     XSPerfAccumulate("s2Redirect_pend_cycles", stage2Redirect_valid_when_pending)
   }
+
+  // vtype commit
+  decode.io.commitVType.bits := io.fromDataPath.vtype
+  decode.io.commitVType.valid := RegNext(rob.io.isVsetFlushPipe)
+
+  io.toDataPath.vtypeAddr := rob.io.vconfigPdest
+
+  // vtype walk
+  val isVsetSeq = rob.io.commits.walkValid.zip(rob.io.commits.info).map { case (valid, info) => valid && info.isVset }.reverse
+  val walkVTypeReverse = rob.io.commits.info.map(info => info.vtype).reverse
+  val walkVType = PriorityMux(isVsetSeq, walkVTypeReverse)
+
+  decode.io.walkVType.bits := walkVType.asTypeOf(new VType)
+  decode.io.walkVType.valid := rob.io.commits.isWalk && isVsetSeq.reduce(_ || _)
+
+  decode.io.isRedirect := s1_s3_redirect.valid
 
   decode.io.in.zip(io.frontend.cfVec).foreach { case (decodeIn, frontendCf) =>
     decodeIn.valid := frontendCf.valid
@@ -294,7 +311,7 @@ class CtrlBlockImp(
   }
 
   // currently, we only update mdp info when isReplay
-  memCtrl.io.redirect <> s1_s3_redirect
+  memCtrl.io.redirect := s1_s3_redirect
   memCtrl.io.csrCtrl := io.csrCtrl                          // RegNext in memCtrl
   memCtrl.io.stIn := io.fromMem.stIn                        // RegNext in memCtrl
   memCtrl.io.memPredUpdate := redirectGen.io.memPredUpdate  // RegNext in memCtrl
@@ -302,13 +319,14 @@ class CtrlBlockImp(
   memCtrl.io.dispatchLFSTio <> dispatch.io.lfst
 
   rat.io.redirect := s1_s3_redirect.valid
-  rat.io.robCommits := rob.io.commits
+  rat.io.robCommits := rob.io.rabCommits
+  rat.io.diffCommits := rob.io.diffCommits
   rat.io.intRenamePorts := rename.io.intRenamePorts
   rat.io.fpRenamePorts := rename.io.fpRenamePorts
   rat.io.vecRenamePorts := rename.io.vecRenamePorts
 
   rename.io.redirect := s1_s3_redirect
-  rename.io.robCommits <> rob.io.commits
+  rename.io.robCommits <> rob.io.rabCommits
   rename.io.waittable := (memCtrl.io.waitTable2Rename zip decode.io.out).map{ case(waittable2rename, decodeOut) =>
     RegEnable(waittable2rename, decodeOut.fire)
   }
@@ -318,8 +336,8 @@ class CtrlBlockImp(
   rename.io.vecReadPorts := VecInit(rat.io.vecReadPorts.map(x => VecInit(x.map(_.data))))
   rename.io.debug_int_rat := rat.io.debug_int_rat
   rename.io.debug_fp_rat := rat.io.debug_fp_rat
-  rename.io.debug_vconfig_rat := rat.io.debug_vconfig_rat
   rename.io.debug_vec_rat := rat.io.debug_vec_rat
+  rename.io.debug_vconfig_rat := rat.io.debug_vconfig_rat
 
   // pipeline between rename and dispatch
   for (i <- 0 until RenameWidth) {
@@ -327,7 +345,7 @@ class CtrlBlockImp(
   }
 
   dispatch.io.hartId := io.fromTop.hartId
-  dispatch.io.redirect <> s1_s3_redirect
+  dispatch.io.redirect := s1_s3_redirect
   dispatch.io.enqRob <> rob.io.enq
   dispatch.io.singleStep := RegNext(io.csrCtrl.singlestep)
 
@@ -392,10 +410,10 @@ class CtrlBlockImp(
   }
 
   rob.io.hartId := io.fromTop.hartId
-  rob.io.redirect <> s1_s3_redirect
+  rob.io.redirect := s1_s3_redirect
   rob.io.writeback := delayedNotFlushedWriteBack
 
-  io.redirect <> s1_s3_redirect
+  io.redirect := s1_s3_redirect
 
   // rob to int block
   io.robio.csr <> rob.io.csr
@@ -412,10 +430,10 @@ class CtrlBlockImp(
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
 
-  io.debug_int_rat := rat.io.debug_int_rat
-  io.debug_fp_rat := rat.io.debug_fp_rat
-  io.debug_vec_rat := rat.io.debug_vec_rat
-  io.debug_vconfig_rat := rat.io.debug_vconfig_rat
+  io.debug_int_rat := rat.io.diff_int_rat
+  io.debug_fp_rat := rat.io.diff_fp_rat
+  io.debug_vec_rat := rat.io.diff_vec_rat
+  io.debug_vconfig_rat := rat.io.diff_vconfig_rat
 
   io.perfInfo.ctrlInfo.robFull := RegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := RegNext(intDq.io.dqFull)
@@ -455,7 +473,11 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val pcVec = Output(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
     val targetVec = Output(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
   }
+  val fromDataPath = new Bundle{
+    val vtype = Input(new VType)
+  }
   val toDataPath = new Bundle {
+    val vtypeAddr = Output(UInt(PhyRegIdxWidth.W))
     val flush = ValidIO(new Redirect)
   }
   val toExuBlock = new Bundle {

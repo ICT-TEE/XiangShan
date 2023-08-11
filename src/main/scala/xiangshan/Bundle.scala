@@ -22,13 +22,33 @@ import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
 import utility._
 import utils._
-import xiangshan.backend.ctrlblock.CtrlToFtqIO
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend._
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.backend.Bundles.DynInst
+import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.frontend.PreDecodeInfo
+import xiangshan.frontend.HasBPUParameter
+import xiangshan.frontend.{AllFoldedHistories, CircularGlobalHistory, GlobalHistory, ShiftingGlobalHistory}
+import xiangshan.frontend.RASEntry
+import xiangshan.frontend.BPUCtrl
+import xiangshan.frontend.FtqPtr
+import xiangshan.frontend.CGHPtr
+import xiangshan.frontend.FtqRead
+import xiangshan.frontend.FtqToCtrlIO
+
+import scala.math.max
+import Chisel.experimental.chiselName
+import chipsalliance.rocketchip.config.Parameters
+import chisel3.util.BitPat.bitPatToUInt
+import chisel3.util.experimental.decode.EspressoMinimizer
+import xiangshan.backend.CtrlToFtqIO
+import xiangshan.backend.fu.PMPEntry
+import xiangshan.frontend.Ftq_Redirect_SRAMEntry
+import xiangshan.frontend.AllFoldedHistories
+import xiangshan.frontend.AllAheadFoldedHistoryOldestBits
 
 class ValidUndirectioned[T <: Data](gen: T) extends Bundle {
   val valid = Bool()
@@ -43,19 +63,20 @@ object ValidUndirectioned {
 }
 
 object RSFeedbackType {
-  val tlbMiss         = 0.U(4.W)
-  val mshrFull        = 1.U(4.W)
-  val dataInvalid     = 2.U(4.W)
-  val bankConflict    = 3.U(4.W)
-  val ldVioCheckRedo  = 4.U(4.W)
+  val lrqFull         = 0.U(4.W)
+  val tlbMiss         = 1.U(4.W)
+  val mshrFull        = 2.U(4.W)
+  val dataInvalid     = 3.U(4.W)
+  val bankConflict    = 4.U(4.W)
+  val ldVioCheckRedo  = 5.U(4.W)
   val feedbackInvalid = 7.U(4.W)
   val issueSuccess    = 8.U(4.W)
-  val issueFail       = 9.U(4.W)
-  val rfArbitSuccess  = 10.U(4.W)
-  val rfArbitFail     = 11.U(4.W)
-  val fuIdle          = 12.U(4.W)
-  val fuBusy          = 13.U(4.W)
+  val rfArbitFail     = 9.U(4.W)
+  val fuIdle          = 10.U(4.W)
+  val fuBusy          = 11.U(4.W)
+  val fuUncertain     = 12.U(4.W)
 
+  val allTypes = 16
   def apply() = UInt(4.W)
 
   def isStageSuccess(feedbackType: UInt) = {
@@ -63,7 +84,7 @@ object RSFeedbackType {
   }
 
   def isBlocked(feedbackType: UInt) = {
-    feedbackType === issueFail || feedbackType === rfArbitFail || feedbackType === fuBusy
+    feedbackType === rfArbitFail || feedbackType === fuBusy || feedbackType >= lrqFull && feedbackType <= feedbackInvalid
   }
 }
 
@@ -151,6 +172,7 @@ class FPUCtrlSignals(implicit p: Parameters) extends XSBundle {
 
 // Decode DecodeWidth insts at Decode Stage
 class CtrlSignals(implicit p: Parameters) extends XSBundle {
+  val debug_globalID = UInt(XLEN.W)
   val srcType = Vec(4, SrcType())
   val lsrc = Vec(4, UInt(6.W))
   val ldest = UInt(6.W)
@@ -163,26 +185,25 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   val noSpecExec = Bool() // wait forward
   val blockBackward = Bool() // block backward
   val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
+  val uopSplitType = UopSplitType()
   val selImm = SelImm()
   val imm = UInt(ImmUnion.maxLen.W)
   val commitType = CommitType()
   val fpu = new FPUCtrlSignals
   val uopIdx = UInt(5.W)
-  val vconfig = UInt(16.W)
   val isMove = Bool()
+  val vm = Bool()
   val singleStep = Bool()
   // This inst will flush all the pipe when it is the oldest inst in ROB,
   // then replay from this inst itself
   val replayInst = Bool()
+  val canRobCompress = Bool()
 
   private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
-    isXSTrap, noSpecExec, blockBackward, flushPipe, selImm)
+    isXSTrap, noSpecExec, blockBackward, flushPipe, canRobCompress, uopSplitType, selImm)
 
   def decode(inst: UInt, table: Iterable[(BitPat, List[BitPat])]): CtrlSignals = {
-    val decoder: Seq[UInt] = ListLookup(
-      inst, XDecode.decodeDefault.map(bitPatToUInt),
-      table.map{ case (pat, pats) => (pat, pats.map(bitPatToUInt)) }.toArray
-    )
+    val decoder = freechips.rocketchip.rocket.DecodeLogic(inst, XDecode.decodeDefault, table, EspressoMinimizer)
     allSignals zip decoder foreach { case (s, d) => s := d }
     commitType := DontCare
     this
@@ -197,6 +218,7 @@ class CtrlSignals(implicit p: Parameters) extends XSBundle {
   def isSoftPrefetch: Bool = {
     fuType === FuType.alu.U && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
   }
+  def needWriteRf: Bool = (rfWen && ldest =/= 0.U) || fpWen || vecWen
 }
 
 class CfCtrl(implicit p: Parameters) extends XSBundle {
@@ -206,15 +228,17 @@ class CfCtrl(implicit p: Parameters) extends XSBundle {
 
 class PerfDebugInfo(implicit p: Parameters) extends XSBundle {
   val eliminatedMove = Bool()
-  // val fetchTime = UInt(64.W)
+  // val fetchTime = UInt(XLEN.W)
   val renameTime = UInt(XLEN.W)
   val dispatchTime = UInt(XLEN.W)
   val enqRsTime = UInt(XLEN.W)
   val selectTime = UInt(XLEN.W)
   val issueTime = UInt(XLEN.W)
   val writebackTime = UInt(XLEN.W)
-  // val commitTime = UInt(64.W)
-  val runahead_checkpoint_id = UInt(64.W)
+  // val commitTime = UInt(XLEN.W)
+  val runahead_checkpoint_id = UInt(XLEN.W)
+  val tlbFirstReqTime = UInt(XLEN.W)
+  val tlbRespTime = UInt(XLEN.W) // when getting hit result (including delay in L2TLB hit)
 }
 
 // Separate LSQ
@@ -230,6 +254,7 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
   val pdest = UInt(PhyRegIdxWidth.W)
   val old_pdest = UInt(PhyRegIdxWidth.W)
   val robIdx = new RobPtr
+  val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
   val lqIdx = new LqPtr
   val sqIdx = new SqPtr
   val eliminatedMove = Bool()
@@ -256,6 +281,14 @@ class MicroOp(implicit p: Parameters) extends CfCtrl {
     if (!replayInst) { ctrl.replayInst := false.B }
     this
   }
+}
+
+class XSBundleWithMicroOp(implicit p: Parameters) extends XSBundle {
+  val uop = new DynInst
+}
+
+class MicroOpRbExt(implicit p: Parameters) extends XSBundleWithMicroOp {
+  val flag = UInt(1.W)
 }
 
 class Redirect(implicit p: Parameters) extends XSBundle {
@@ -286,6 +319,9 @@ class DebugBundle(implicit p: Parameters) extends XSBundle {
   val isPerfCnt = Bool()
   val paddr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
+  /* add L/S inst info in EXU */
+  // val L1toL2TlbLatency = UInt(XLEN.W)
+  // val levelTlbHit = UInt(2.W)
 }
 
 class ExternalInterruptIO(implicit p: Parameters) extends XSBundle {
@@ -305,11 +341,37 @@ class CSRSpecialIO(implicit p: Parameters) extends XSBundle {
   val interrupt = Output(Bool())
 }
 
+class RabCommitInfo(implicit p: Parameters) extends XSBundle {
+  val ldest = UInt(6.W)
+  val pdest = UInt(PhyRegIdxWidth.W)
+  val old_pdest = UInt(PhyRegIdxWidth.W)
+  val rfWen = Bool()
+  val fpWen = Bool()
+  val vecWen = Bool()
+  val isMove = Bool()
+}
+
+class RabCommitIO(implicit p: Parameters) extends XSBundle {
+  val isCommit = Bool()
+  val commitValid = Vec(CommitWidth, Bool())
+  val isWalk = Bool()
+  val walkValid = Vec(CommitWidth, Bool())
+  val info = Vec(CommitWidth, new RabCommitInfo)
+}
+
+class DiffCommitIO(implicit p: Parameters) extends XSBundle {
+  val isCommit = Bool()
+  val commitValid = Vec(CommitWidth * MaxUopSize, Bool())
+
+  val info = Vec(CommitWidth * MaxUopSize, new RobCommitInfo)
+}
+
 class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val ldest = UInt(6.W)
   val rfWen = Bool()
   val fpWen = Bool()
   val vecWen = Bool()
+  def fpVecWen = fpWen || vecWen
   val wflags = Bool()
   val commitType = CommitType()
   val pdest = UInt(PhyRegIdxWidth.W)
@@ -317,12 +379,13 @@ class RobCommitInfo(implicit p: Parameters) extends XSBundle {
   val ftqIdx = new FtqPtr
   val ftqOffset = UInt(log2Up(PredictWidth).W)
   val isMove = Bool()
+  val isVset = Bool()
+  val vtype = new VType
 
   // these should be optimized for synthesis verilog
   val pc = UInt(VAddrBits.W)
 
-  val uopIdx = UInt(5.W)
-//  val vconfig = UInt(16.W)
+  val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
 }
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
@@ -429,6 +492,14 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Prefetcher
   val l1I_pf_enable = Output(Bool())
   val l2_pf_enable = Output(Bool())
+  val l1D_pf_enable = Output(Bool())
+  val l1D_pf_train_on_hit = Output(Bool())
+  val l1D_pf_enable_agt = Output(Bool())
+  val l1D_pf_enable_pht = Output(Bool())
+  val l1D_pf_active_threshold = Output(UInt(4.W))
+  val l1D_pf_active_stride = Output(UInt(6.W))
+  val l1D_pf_enable_stride = Output(Bool())
+  val l2_pf_store_only = Output(Bool())
   // ICache
   val icache_parity_enable = Output(Bool())
   // Labeled XiangShan

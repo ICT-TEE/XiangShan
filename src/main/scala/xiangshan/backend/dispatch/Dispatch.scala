@@ -82,10 +82,14 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     // cover auipc (a fake branch)
     !req.bits.preDecodeInfo.notCFI || FuType.isJump(req.bits.fuType)
   ))
-  val isFp     = VecInit(io.fromRename.map(req => FuType.isFp (req.bits.fuType)))
-  val isMem    = VecInit(io.fromRename.map(req => FuType.isMem(req.bits.fuType)))
+  val isFp     = VecInit(io.fromRename.map(req => FuType.isFp (req.bits.fuType) ||
+                                                  FuType.isVpu (req.bits.fuType)))
+  val isMem    = VecInit(io.fromRename.map(req => FuType.isMem(req.bits.fuType) ||
+                                                  FuType.isVls (req.bits.fuType)))
   val isLs     = VecInit(io.fromRename.map(req => FuType.isLoadStore(req.bits.fuType)))
+  val isVls    = VecInit(io.fromRename.map(req => FuType.isVls (req.bits.fuType)))
   val isStore  = VecInit(io.fromRename.map(req => FuType.isStore(req.bits.fuType)))
+  val isVStore = VecInit(io.fromRename.map(req => FuType.isVStore(req.bits.fuType)))
   val isAMO    = VecInit(io.fromRename.map(req => FuType.isAMO(req.bits.fuType)))
   val isBlockBackward = VecInit(io.fromRename.map(_.bits.blockBackward))
   val isWaitForward    = VecInit(io.fromRename.map(_.bits.waitForward))
@@ -107,7 +111,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
 
   for (i <- 0 until RenameWidth) {
-    updatedCommitType(i) := Cat(isLs(i), (isStore(i) && !isAMO(i)) | isBranch(i))
+    updatedCommitType(i) := Cat(isLs(i) | isVls(i), (isStore(i) && !isAMO(i)) | isVStore(i) | isBranch(i))
 
     updatedUop(i) := io.fromRename(i).bits
     updatedUop(i).debugInfo.eliminatedMove := io.fromRename(i).bits.eliminatedMove
@@ -121,7 +125,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     when (io.fromRename(i).bits.isLUI) {
       updatedUop(i).psrc(0) := 0.U
     }
-
+    //TODO: vec ls mdp
     io.lfst.req(i).valid := io.fromRename(i).fire && updatedUop(i).storeSetHit
     io.lfst.req(i).bits.isstore := isStore(i)
     io.lfst.req(i).bits.ssid := updatedUop(i).ssid
@@ -200,6 +204,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // (1) resources are ready
   // (2) previous instructions are ready
   val thisCanActualOut = (0 until RenameWidth).map(i => !thisIsBlocked(i) && notBlockedByPrevious(i))
+  val thisActualOut = (0 until RenameWidth).map(i => io.enqRob.req(i).valid && io.enqRob.canAccept)
   val hasValidException = io.fromRename.zip(hasException).map(x => x._1.valid && x._2)
 
   // input for ROB, LSQ, Dispatch Queue
@@ -251,7 +256,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     )
 
     io.allocPregs(i).isInt := io.fromRename(i).valid && io.fromRename(i).bits.rfWen && (io.fromRename(i).bits.ldest =/= 0.U) && !io.fromRename(i).bits.eliminatedMove
-    io.allocPregs(i).isFp  := io.fromRename(i).valid && io.fromRename(i).bits.fpWen
+    io.allocPregs(i).isFp  := io.fromRename(i).valid && (io.fromRename(i).bits.fpWen || io.fromRename(i).bits.vecWen)
     io.allocPregs(i).preg  := io.fromRename(i).bits.pdest
   }
   val renameFireCnt = PopCount(io.recv)
@@ -260,31 +265,50 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     PopCount(io.toLsDq.req.map(_.valid && io.toLsDq.canAccept))
   XSError(enqFireCnt > renameFireCnt, "enqFireCnt should not be greater than renameFireCnt\n")
 
+  val stall_rob = hasValidInstr && !io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+  val stall_int_dq = hasValidInstr && io.enqRob.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+  val stall_fp_dq = hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept
+  val stall_ls_dq = hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept
   XSPerfAccumulate("in", Mux(RegNext(io.fromRename(0).ready), PopCount(io.fromRename.map(_.valid)), 0.U))
   XSPerfAccumulate("empty", !hasValidInstr)
   XSPerfAccumulate("utilization", PopCount(io.fromRename.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
-  XSPerfAccumulate("stall_cycle_rob", hasValidInstr && !io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerfAccumulate("stall_cycle_int_dq", hasValidInstr && io.enqRob.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerfAccumulate("stall_cycle_fp_dq", hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerfAccumulate("stall_cycle_ls_dq", hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_rob", stall_rob)
+  XSPerfAccumulate("stall_cycle_int_dq", stall_int_dq)
+  XSPerfAccumulate("stall_cycle_fp_dq", stall_fp_dq)
+  XSPerfAccumulate("stall_cycle_ls_dq", stall_ls_dq)
+
+  XSPerfHistogram("slots_fire", PopCount(thisActualOut), true.B, 0, RenameWidth+1, 1)
+  // Explaination: when out(0) not fire, PopCount(valid) is not meaningfull
+  XSPerfHistogram("slots_valid_pure", PopCount(io.enqRob.req.map(_.valid)), thisActualOut(0), 0, RenameWidth+1, 1)
+  XSPerfHistogram("slots_valid_rough", PopCount(io.enqRob.req.map(_.valid)), true.B, 0, RenameWidth+1, 1)
 
   if (env.EnableTopDown) {
-    val stall_ls_dq = hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept
-    ExcitingUtils.addSource(stall_ls_dq, "stall_ls_dq", ExcitingUtils.Perf)
+    val rob_first_load = WireDefault(false.B)
+    val rob_first_store = WireDefault(false.B)
+    ExcitingUtils.addSink(rob_first_load, "rob_first_load", ExcitingUtils.Perf)
+    ExcitingUtils.addSink(rob_first_store, "rob_first_store", ExcitingUtils.Perf)
+    val rob_first_ls = rob_first_load || rob_first_store
+
+    XSPerfAccumulate("stall_cycle_rob_blame", stall_rob && !rob_first_ls)
+    XSPerfAccumulate("stall_cycle_int_blame", stall_int_dq && !rob_first_ls)
+    XSPerfAccumulate("stall_cycle_fp_blame", stall_fp_dq && !rob_first_ls)
+    XSPerfAccumulate("stall_cycle_ls_blame", stall_ls_dq || ((stall_rob || stall_int_dq || stall_fp_dq) && rob_first_ls))
+    val stall_ls_blame = stall_ls_dq || ((stall_rob || stall_int_dq || stall_fp_dq) && rob_first_ls)
+    ExcitingUtils.addSource(stall_ls_blame, "stall_ls_blame", ExcitingUtils.Perf)
     // TODO: we may need finer counters to count responding slots more precisely, i.e. per-slot granularity.
   }
 
   val perfEvents = Seq(
-    ("dispatch_in",                 PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))                                              ),
-    ("dispatch_empty",              !hasValidInstr                                                                                             ),
-    ("dispatch_utili",              PopCount(io.fromRename.map(_.valid))                                                                       ),
-    ("dispatch_waitinstr",          PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i)))                            ),
-    ("dispatch_stall_cycle_lsq",    false.B                                                                                                    ),
-    ("dispatch_stall_cycle_rob",    hasValidInstr && !io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept),
-    ("dispatch_stall_cycle_int_dq", hasValidInstr && io.enqRob.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept),
-    ("dispatch_stall_cycle_fp_dq",  hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept),
-    ("dispatch_stall_cycle_ls_dq",  hasValidInstr && io.enqRob.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
+    ("dispatch_in",                 PopCount(io.fromRename.map(_.valid & io.fromRename(0).ready))                  ),
+    ("dispatch_empty",              !hasValidInstr                                                                 ),
+    ("dispatch_utili",              PopCount(io.fromRename.map(_.valid))                                           ),
+    ("dispatch_waitinstr",          PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i)))),
+    ("dispatch_stall_cycle_lsq",    false.B                                                                        ),
+    ("dispatch_stall_cycle_rob",    stall_rob                                                                      ),
+    ("dispatch_stall_cycle_int_dq", stall_int_dq                                                                   ),
+    ("dispatch_stall_cycle_fp_dq",  stall_fp_dq                                                                    ),
+    ("dispatch_stall_cycle_ls_dq",  stall_ls_dq                                                                    )
   )
   generatePerfEvent()
 }

@@ -58,7 +58,7 @@ package object xiangshan {
     def isBusy(state: UInt): Bool = state === this.busy
   }
 
-  def FuOpTypeWidth = 8
+  def FuOpTypeWidth = 9
   object FuOpType {
     def apply() = UInt(FuOpTypeWidth.W)
     def X = BitPat("b00000000")
@@ -97,7 +97,8 @@ package object xiangshan {
   }
 
   object ExceptionVec {
-    def apply() = Vec(16, Bool())
+    val ExceptionVecSize = 16
+    def apply() = Vec(ExceptionVecSize, Bool())
   }
 
   object PMAMode {
@@ -266,23 +267,75 @@ package object xiangshan {
     def xorzexth   = "b110_0101".U
     def orcblsb    = "b110_0110".U
     def orcbzexth  = "b110_0111".U
-    def vsetvli1    = "b1000_0000".U
-    def vsetvli2    = "b1000_0100".U
-    def vsetvl1     = "b1000_0001".U
-    def vsetvl2     = "b1000_0101".U
-    def vsetivli1   = "b1000_0010".U
-    def vsetivli2   = "b1000_0110".U
 
     def isAddw(func: UInt) = func(6, 4) === "b001".U && !func(3) && !func(1)
     def isSimpleLogic(func: UInt) = func(6, 4) === "b100".U && !func(0)
     def logicToLsb(func: UInt) = Cat("b110".U(3.W), func(3, 1), 0.U(1.W))
     def logicToZexth(func: UInt) = Cat("b110".U(3.W), func(3, 1), 1.U(1.W))
-    def isVset(func: UInt) = func(7, 3) === "b1000_0".U
-    def isVsetvl(func: UInt) = isVset(func) && func(0)
-    def isVsetvli(func: UInt) = isVset(func) && !func(1, 0).orR
-    def vsetExchange(func: UInt) = Cat(func(7, 3), "b1".U, func(1, 0))
 
     def apply() = UInt(FuOpTypeWidth.W)
+  }
+
+  object VSETOpType {
+    val setVlmaxBit = 0
+    val keepVlBit   = 1
+    // destTypeBit == 0: write vl to rd
+    // destTypeBit == 1: write vconfig
+    val destTypeBit = 5
+
+    // vsetvli's uop
+    //   rs1!=x0, normal
+    //     uop0: r(rs1), w(vconfig)     | x[rs1],vtypei  -> vconfig
+    //     uop1: r(rs1), w(rd)          | x[rs1],vtypei  -> x[rd]
+    def uvsetvcfg_xi        = "b1010_0000".U
+    def uvsetrd_xi          = "b1000_0000".U
+    //   rs1==x0, rd!=x0, set vl to vlmax, set rd to vlmax, set vtype
+    //     uop0: w(vconfig)             | vlmax, vtypei  -> vconfig
+    //     uop1: w(rd)                  | vlmax, vtypei  -> x[rd]
+    def uvsetvcfg_vlmax_i   = "b1010_0001".U
+    def uvsetrd_vlmax_i     = "b1000_0001".U
+    //   rs1==x0, rd==x0, keep vl, set vtype
+    //     uop0: r(vconfig), w(vconfig) | ld_vconfig.vl, vtypei -> vconfig
+    def uvsetvcfg_keep_v    = "b1010_0010".U
+
+    // vsetvl's uop
+    //   rs1!=x0, normal
+    //     uop0: r(rs1,rs2), w(vconfig) | x[rs1],x[rs2]  -> vconfig
+    //     uop1: r(rs1,rs2), w(rd)      | x[rs1],x[rs2]  -> x[rd]
+    def uvsetvcfg_xx        = "b0110_0000".U
+    def uvsetrd_xx          = "b0100_0000".U
+    //   rs1==x0, rd!=x0, set vl to vlmax, set rd to vlmax, set vtype
+    //     uop0: r(rs2), w(vconfig)     | vlmax, vtypei  -> vconfig
+    //     uop1: r(rs2), w(rd)          | vlmax, vtypei  -> x[rd]
+    def uvsetvcfg_vlmax_x   = "b0110_0001".U
+    def uvsetrd_vlmax_x     = "b0100_0001".U
+    //   rs1==x0, rd==x0, keep vl, set vtype
+    //     uop0: r(rs2), w(vtmp)             | x[rs2]               -> vtmp
+    //     uop0: r(vconfig,vtmp), w(vconfig) | old_vconfig.vl, vtmp -> vconfig
+    def uvmv_v_x            = "b0110_0010".U
+    def uvsetvcfg_vv        = "b0111_0010".U
+
+    // vsetivli's uop
+    //     uop0: w(vconfig)             | vli, vtypei    -> vconfig
+    //     uop1: w(rd)                  | vli, vtypei    -> x[rd]
+    def uvsetvcfg_ii        = "b0010_0000".U
+    def uvsetrd_ii          = "b0000_0000".U
+
+    def isVsetvl  (func: UInt)  = func(6)
+    def isVsetvli (func: UInt)  = func(7)
+    def isVsetivli(func: UInt)  = func(7, 6) === 0.U
+    def isNormal  (func: UInt)  = func(1, 0) === 0.U
+    def isSetVlmax(func: UInt)  = func(setVlmaxBit)
+    def isKeepVl  (func: UInt)  = func(keepVlBit)
+    // RG: region
+    def writeIntRG(func: UInt)  = !func(5)
+    def writeVecRG(func: UInt)  = func(5)
+    def readIntRG (func: UInt)  = !func(4)
+    def readVecRG (func: UInt)  = func(4)
+    // modify fuOpType
+    def switchDest(func: UInt)  = func ^ (1 << destTypeBit).U
+    def keepVl(func: UInt)      = func | (1 << keepVlBit).U
+    def setVlmax(func: UInt)    = func | (1 << setVlmaxBit).U
   }
 
   object BRUOpType {
@@ -496,7 +549,7 @@ package object xiangshan {
 
   object SelImm {
     def IMM_X  = "b0111".U
-    def IMM_S  = "b0000".U
+    def IMM_S  = "b1110".U
     def IMM_SB = "b0001".U
     def IMM_U  = "b0010".U
     def IMM_UJ = "b0011".U
@@ -513,6 +566,73 @@ package object xiangshan {
     def X      = BitPat("b0000")
 
     def apply() = UInt(4.W)
+
+    def mkString(immType: UInt) : String = {
+      val strMap = Map(
+        IMM_S.litValue         -> "S",
+        IMM_SB.litValue        -> "SB",
+        IMM_U.litValue         -> "U",
+        IMM_UJ.litValue        -> "UJ",
+        IMM_I.litValue         -> "I",
+        IMM_Z.litValue         -> "Z",
+        IMM_B6.litValue        -> "B6",
+        IMM_OPIVIS.litValue    -> "VIS",
+        IMM_OPIVIU.litValue    -> "VIU",
+        IMM_VSETVLI.litValue   -> "VSETVLI",
+        IMM_VSETIVLI.litValue  -> "VSETIVLI",
+        INVALID_INSTR.litValue -> "INVALID",
+      )
+      strMap(immType.litValue)
+    }
+  }
+
+  object UopSplitType {
+    def SCA_SIM          = "b000000".U //
+    def DIR              = "b010001".U // dirty: vset
+    def VEC_VVV          = "b010010".U // VEC_VVV
+    def VEC_VXV          = "b010011".U // VEC_VXV
+    def VEC_0XV          = "b010100".U // VEC_0XV
+    def VEC_VVW          = "b010101".U // VEC_VVW
+    def VEC_WVW          = "b010110".U // VEC_WVW
+    def VEC_VXW          = "b010111".U // VEC_VXW
+    def VEC_WXW          = "b011000".U // VEC_WXW
+    def VEC_WVV          = "b011001".U // VEC_WVV
+    def VEC_WXV          = "b011010".U // VEC_WXV
+    def VEC_EXT2         = "b011011".U // VF2 0 -> V
+    def VEC_EXT4         = "b011100".U // VF4 0 -> V
+    def VEC_EXT8         = "b011101".U // VF8 0 -> V
+    def VEC_VVM          = "b011110".U // VEC_VVM
+    def VEC_VXM          = "b011111".U // VEC_VXM
+    def VEC_SLIDE1UP     = "b100000".U // vslide1up.vx
+    def VEC_FSLIDE1UP    = "b100001".U // vfslide1up.vf
+    def VEC_SLIDE1DOWN   = "b100010".U // vslide1down.vx
+    def VEC_FSLIDE1DOWN  = "b100011".U // vfslide1down.vf
+    def VEC_VRED         = "b100100".U // VEC_VRED
+    def VEC_SLIDEUP      = "b100101".U // VEC_SLIDEUP
+    def VEC_ISLIDEUP     = "b100110".U // VEC_ISLIDEUP
+    def VEC_SLIDEDOWN    = "b100111".U // VEC_SLIDEDOWN
+    def VEC_ISLIDEDOWN   = "b101000".U // VEC_ISLIDEDOWN
+    def VEC_M0X          = "b101001".U // VEC_M0X  0MV
+    def VEC_MVV          = "b101010".U // VEC_MVV  VMV
+    def VEC_M0X_VFIRST   = "b101011".U //
+    def VEC_VWW          = "b101100".U //
+    def VEC_RGATHER      = "b101101".U // vrgather.vv, vrgather.vi
+    def VEC_RGATHER_VX   = "b101110".U // vrgather.vx
+    def VEC_RGATHEREI16  = "b101111".U // vrgatherei16.vv
+    def VEC_COMPRESS     = "b110000".U // vcompress.vm
+    def VEC_US_LD        = "b110001".U // vector unit strided load
+    def VEC_VFV          = "b111000".U // VEC_VFV
+    def VEC_VFW          = "b111001".U // VEC_VFW
+    def VEC_WFW          = "b111010".U // VEC_WVW
+    def VEC_VFM          = "b111011".U // VEC_VFM
+    def VEC_M0M          = "b000000".U // VEC_M0M
+    def VEC_MMM          = "b000000".U // VEC_MMM
+    def dummy     = "b111111".U
+
+    def X = BitPat("b000000")
+
+    def apply() = UInt(6.W)
+    def needSplit(UopSplitType: UInt) = UopSplitType(4) || UopSplitType(5)
   }
 
   object ExceptionNO {

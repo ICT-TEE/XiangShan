@@ -1,32 +1,39 @@
 package xiangshan.backend.issue
 
 import chipsalliance.rocketchip.config.Parameters
-import chisel3.util._
 import chisel3._
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput, IssueQueueIssueBundle, OGRespBundle}
-import xiangshan.backend.datapath.WbConfig.WbConfig
-import xiangshan.backend.exu.ExeUnitParams
+import chisel3.util._
+import utils.SeqUtils
+import xiangshan.backend.BackendParams
+import xiangshan.backend.Bundles._
+import xiangshan.backend.datapath.DataConfig.DataConfig
+import xiangshan.backend.datapath.WbConfig.PregWB
+import xiangshan.backend.datapath.{WakeUpConfig, WakeUpSource}
+import xiangshan.backend.exu.{ExeUnit, ExeUnitParams}
 import xiangshan.backend.fu.{FuConfig, FuType}
 
 case class IssueBlockParams(
   // top down
   exuBlockParams     : Seq[ExeUnitParams],
   numEntries         : Int,
-  pregBits           : Int,
-  numWakeupFromWB    : Int,
+  numEnq             : Int,
   numDeqOutside      : Int = 0,
   numWakeupFromOthers: Int = 0,
   XLEN               : Int = 64,
   VLEN               : Int = 128,
   vaddrBits          : Int = 39,
   // calculate in scheduler
-  var numEnq         : Int = 0,
-  var numWakeupFromIQ: Int = 0,
+  var idxInSchBlk    : Int = 0,
 )(
   implicit
-  // top down
   val schdType: SchedulerType,
 ) {
+  var backendParam: BackendParams = null
+
+  def updateIdx(idx: Int): Unit = {
+    this.idxInSchBlk = idx
+  }
+
   def inMemSchd: Boolean = schdType == MemScheduler()
 
   def inIntSchd: Boolean = schdType == IntScheduler()
@@ -95,8 +102,6 @@ case class IssueBlockParams(
 
   def numNoDataWB: Int = exuBlockParams.count(_.hasNoDataWB)
 
-  def numRegSrcMax: Int = numIntSrc max numFpSrc max numVecSrc
-
   def dataBitsMax: Int = if (numVecSrc > 0) VLEN else XLEN
 
   def numDeq: Int = numDeqOutside + exuBlockParams.length
@@ -119,7 +124,7 @@ case class IssueBlockParams(
 
   def BkuCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.bku)).sum
 
-  def VsetCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.vset)).sum
+  def VsetCnt: Int = exuBlockParams.map(_.fuConfigs.count(x => x.fuType == FuType.vsetiwi || x.fuType == FuType.vsetiwf || x.fuType == FuType.vsetfwf)).sum
 
   def FmacCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fmac)).sum
 
@@ -145,17 +150,89 @@ case class IssueBlockParams(
 
   def numRedirect: Int = exuBlockParams.count(_.hasRedirect)
 
-  def numAllWakeUp = numWakeupFromWB + numWakeupFromIQ + numWakeupFromOthers
+  /**
+    * Get the regfile type that this issue queue need to read
+    */
+  def pregReadSet: Set[DataConfig] = exuBlockParams.map(_.pregRdDataCfgSet).fold(Set())(_ union _)
+
+  /**
+    * Get the regfile type that this issue queue need to read
+    */
+  def pregWriteSet: Set[DataConfig] = exuBlockParams.map(_.pregWbDataCfgSet).fold(Set())(_ union _)
+
+  /**
+    * Get the max width of psrc
+    */
+  def rdPregIdxWidth = {
+    this.pregReadSet.map(cfg => backendParam.getPregParams(cfg).addrWidth).fold(0)(_ max _)
+  }
+
+  /**
+    * Get the max width of pdest
+    */
+  def wbPregIdxWidth = {
+    this.pregWriteSet.map(cfg => backendParam.getPregParams(cfg).addrWidth).fold(0)(_ max _)
+  }
+
+  def iqWakeUpSourcePairs: Seq[WakeUpConfig] = exuBlockParams.flatMap(_.iqWakeUpSourcePairs)
+
+  /** Get exu source wake up
+    * @todo replace with
+    *       exuBlockParams
+    *       .flatMap(_.iqWakeUpSinkPairs)
+    *       .map(_.source)
+    *       .distinctBy(_.name)
+    *       when xiangshan is updated to 2.13.11
+    */
+  def wakeUpInExuSources: Seq[WakeUpSource] = {
+    SeqUtils.distinctBy(
+      exuBlockParams
+        .flatMap(_.iqWakeUpSinkPairs)
+        .map(_.source)
+    )(_.name)
+  }
+
+  def wakeUpOutExuSources: Seq[WakeUpSource] = {
+    SeqUtils.distinctBy(
+      exuBlockParams
+        .flatMap(_.iqWakeUpSourcePairs)
+        .map(_.source)
+    )(_.name)
+  }
+
+  def wakeUpToExuSinks = exuBlockParams
+    .flatMap(_.iqWakeUpSourcePairs)
+    .map(_.sink).distinct
+
+  def numWakeupFromIQ: Int = wakeUpInExuSources.size
+
+  def numAllWakeUp: Int = numWakeupFromWB + numWakeupFromIQ + numWakeupFromOthers
+
+  def numWakeupFromWB = {
+    val pregSet = this.pregReadSet
+    pregSet.map(cfg => backendParam.getRfWriteSize(cfg)).sum
+  }
+
+  def hasIQWakeUp: Boolean = numWakeupFromIQ > 0
 
   def getFuCfgs: Seq[FuConfig] = exuBlockParams.flatMap(_.fuConfigs).distinct
 
   // cfgs(exuIdx)(set of exu's wb)
-  def getWbCfgs: Seq[Set[WbConfig]] = {
+
+  /**
+    * Get [[PregWB]] of this IssueBlock
+    * @return set of [[PregWB]] of [[ExeUnit]]
+    */
+  def getWbCfgs: Seq[Set[PregWB]] = {
     exuBlockParams.map(exu => exu.wbPortConfigs.toSet)
   }
 
   def canAccept(fuType: UInt): Bool = {
     Cat(getFuCfgs.map(_.fuType.U === fuType)).orR
+  }
+
+  def bindBackendParam(param: BackendParams): Unit = {
+    backendParam = param
   }
 
   def genExuInputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuInput]] = {
@@ -170,13 +247,56 @@ case class IssueBlockParams(
     MixedVec(this.exuBlockParams.map(x => ValidIO(x.genExuOutputBundle)))
   }
 
+  def genExuBypassValidBundle(implicit p: Parameters): MixedVec[ValidIO[ExuBypassBundle]] = {
+    MixedVec(this.exuBlockParams.map(x => ValidIO(x.genExuBypassBundle)))
+  }
+
   def genIssueDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[IssueQueueIssueBundle]] = {
-    MixedVec(exuBlockParams.map(x => DecoupledIO(new IssueQueueIssueBundle(this, x, pregBits, vaddrBits))))
+    MixedVec(exuBlockParams.map(x => DecoupledIO(new IssueQueueIssueBundle(this, x))))
+  }
+
+  def genWBWakeUpSinkValidBundle: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = {
+    val intBundle: Seq[ValidIO[IssueQueueWBWakeUpBundle]] = schdType match {
+      case IntScheduler() | MemScheduler() => backendParam.getIntWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case _ => Seq()
+    }
+    val vfBundle = schdType match {
+      case VfScheduler() | MemScheduler() => backendParam.getVfWBExeGroup.map(x => ValidIO(new IssueQueueWBWakeUpBundle(x._2.map(_.exuIdx), backendParam))).toSeq
+      case _ => Seq()
+    }
+    MixedVec(intBundle ++ vfBundle)
+  }
+
+  def genIQWakeUpSourceValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
+    MixedVec(exuBlockParams.map(x => ValidIO(new IssueQueueIQWakeUpBundle(x.exuIdx, backendParam))))
+  }
+
+  def genIQWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
+    MixedVec(this.wakeUpInExuSources.map(x => ValidIO(new IssueQueueIQWakeUpBundle(backendParam.getExuIdx(x.name), backendParam))))
   }
 
   def genOGRespBundle(implicit p: Parameters) = {
     implicit val issueBlockParams = this
     MixedVec(exuBlockParams.map(_ => new OGRespBundle))
+  }
+
+  def genWbFuBusyTableWriteBundle()(implicit p: Parameters) = {
+    implicit val issueBlockParams = this
+    MixedVec(exuBlockParams.map(x => new WbFuBusyTableWriteBundle(x)))
+  }
+
+  def genWbFuBusyTableReadBundle()(implicit p: Parameters) = {
+    implicit val issueBlockParams = this
+    MixedVec(exuBlockParams.map{ x =>
+      new WbFuBusyTableReadBundle(x)
+    })
+  }
+
+  def genWbConflictBundle()(implicit p: Parameters) = {
+    implicit val issueBlockParams = this
+    MixedVec(exuBlockParams.map { x =>
+      new WbConflictBundle(x)
+    })
   }
 
   def getIQName = {

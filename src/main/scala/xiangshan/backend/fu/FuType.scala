@@ -17,7 +17,7 @@ object FuType {
   val div = OHInt(6)
   val fence = OHInt(7)
   val bku = OHInt(8)
-  val vset = OHInt(9)
+  val vsetiwi = OHInt(9) // vset read rs write rd
   val fmac = OHInt(10)
   val fmisc = OHInt(11)
   val fDivSqrt = OHInt(12)
@@ -25,23 +25,33 @@ object FuType {
   val stu = OHInt(14)
   val mou = OHInt(15)
   val vipu = OHInt(16)
-  val vfpu = OHInt(17)
-  val vldu = OHInt(18)
-  val vstu = OHInt(19)
+  val vialuF = OHInt(17)
+  val vfpu = OHInt(18) // will be delated
+  val vldu = OHInt(19)
+  val vstu = OHInt(20)
+  val vppu = OHInt(21)
+  val vsetiwf = OHInt(22) // vset read rs write vconfig
+  val vsetfwf = OHInt(23) // vset read old vl write vconfig
+  val vimac = OHInt(24)
+  val vfalu = OHInt(25)
+  val vfma  = OHInt(26)
+  val vfdiv = OHInt(27) // Todo
 
   def X = BitPat.N(num) // Todo: Don't Care
 
-  def num = 20
+  def num = 28
 
   def width = num
 
   def apply() = UInt(num.W)
 
-  def isInt(fuType: UInt): Bool = fuType(9, 0).orR // from jmp to vset
+  def isInt(fuType: UInt): Bool = fuType(9, 0).orR || fuType(22)// from jmp to vset
+
+  def isVset(fuType: UInt): Bool = fuType(9) || fuType(22) || fuType(23)
 
   def isJump(fuType: UInt): Bool = fuType(0)
 
-  def isFp(fuType: UInt): Bool = fuType(12, 10).orR
+  def isFp(fuType: UInt): Bool = fuType(12, 10).orR || fuType(25) || fuType(26) || fuType(27)
 
   def isMem(fuType: UInt): Bool = fuType(15, 13).orR
 
@@ -55,7 +65,17 @@ object FuType {
 
   def isFence(fuType: UInt): Bool = fuType(7)
 
-  def isVpu(fuType: UInt): Bool = fuType(17, 16).orR
+  def isVpu(fuType: UInt): Bool = fuType(18, 16).orR || fuType(21) || fuType(24)
+
+  def isVls(fuType: UInt): Bool = fuType(20, 19).orR
+
+  def isVLoad(fuType: UInt): Bool = fuType(19)
+
+  def isVStore(fuType: UInt): Bool = fuType(20)
+
+  def isVfp(fuType: UInt): Bool = fuType(18) || fuType(27, 25).orR
+
+  def isVector(fuType: UInt): Bool = fuType(27, 24).orR || fuType(21, 16).orR // except vset
 
   def storeIsAMO(fuType: UInt): Bool = fuType(15)
 

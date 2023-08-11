@@ -5,12 +5,12 @@ import chisel3._
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import xiangshan._
-import xiangshan.backend.Bundles
-import xiangshan.backend.datapath.DataConfig.VAddrData
+import xiangshan.backend.Bundles._
+import xiangshan.backend.datapath.DataConfig.{IntData, VAddrData, VecData}
+import xiangshan.backend.datapath.WbConfig.{IntWB, VfWB}
 import xiangshan.backend.regfile.RfWritePortWithConfig
 import xiangshan.backend.rename.BusyTable
 import xiangshan.mem.{LsqEnqCtrl, LsqEnqIO, MemWaitUpdateReq, SqPtr}
-import xiangshan.backend.Bundles.{DynInst, IssueQueueWakeUpBundle}
 
 sealed trait SchedulerType
 
@@ -20,8 +20,8 @@ case class VfScheduler() extends SchedulerType
 case class NoScheduler() extends SchedulerType
 
 class Scheduler(val params: SchdBlockParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
-  val numIntStateWrite = backendParams.numIntWb
-  val numVfStateWrite = backendParams.numVfWb
+  val numIntStateWrite = backendParams.numPregWb(IntData())
+  val numVfStateWrite = backendParams.numPregWb(VecData())
 
   val dispatch2Iq = LazyModule(new Dispatch2Iq(params))
   val issueQueue = params.issueBlockParams.map(x => LazyModule(new IssueQueue(x).suggestName(x.getIQName)))
@@ -34,10 +34,23 @@ class Scheduler(val params: SchdBlockParams)(implicit p: Parameters) extends Laz
   }
 }
 
-class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSBundle {
+class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends Bundle {
+  // params alias
+  private val backendParams = params.backendParam
+  private val LoadQueueSize = p(XSCoreParamsKey).VirtualLoadQueueSize
+  private val RenameWidth = p(XSCoreParamsKey).RenameWidth
+  private val CommitWidth = p(XSCoreParamsKey).CommitWidth
+  private val EnsbufferWidth = p(XSCoreParamsKey).EnsbufferWidth
+  private val StoreQueueSize = p(XSCoreParamsKey).StoreQueueSize
+
   val fromTop = new Bundle {
     val hartId = Input(UInt(8.W))
   }
+  val fromWbFuBusyTable = new Bundle{
+    val fuBusyTableRead = MixedVec(params.issueBlockParams.map(x => Input(x.genWbFuBusyTableReadBundle)))
+  }
+  val wbFuBusyTable = MixedVec(params.issueBlockParams.map(x => Output(x.genWbFuBusyTableWriteBundle)))
+
   val fromCtrlBlock = new Bundle {
     val pcVec = Input(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
     val targetVec = Input(Vec(params.numPcReadPort, UInt(VAddrData().dataWidth.W)))
@@ -47,18 +60,38 @@ class SchedulerIO()(implicit params: SchdBlockParams, p: Parameters) extends XSB
     val allocPregs = Vec(RenameWidth, Input(new ResetPregStateReq))
     val uops =  Vec(params.numUopIn, Flipped(DecoupledIO(new DynInst)))
   }
-  val intWriteBack = MixedVec(Vec(backendParams.intPregParams.numWrite,
+  val intWriteBack = MixedVec(Vec(backendParams.numPregWb(IntData()),
     new RfWritePortWithConfig(backendParams.intPregParams.dataCfg, backendParams.intPregParams.addrWidth)))
-  val vfWriteBack = MixedVec(Vec(backendParams.vfPregParams.numWrite,
+  val vfWriteBack = MixedVec(Vec(backendParams.numPregWb(VecData()),
     new RfWritePortWithConfig(backendParams.vfPregParams.dataCfg, backendParams.vfPregParams.addrWidth)))
-  val toDataPath: MixedVec[MixedVec[DecoupledIO[Bundles.IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
-  val fromDataPath: MixedVec[MixedVec[Bundles.OGRespBundle]] = MixedVec(params.issueBlockParams.map(x => Flipped(x.genOGRespBundle)))
+  val toDataPath: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
+  val toDataPathAfterDelay: MixedVec[MixedVec[DecoupledIO[IssueQueueIssueBundle]]] = MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle))
+  val fromCancelNetwork = Flipped(MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle)))
+
+  val fromSchedulers = new Bundle {
+    val wakeupVec: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpInValidBundle)
+  }
+
+  val toSchedulers = new Bundle {
+    val wakeupVec: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = params.genIQWakeUpOutValidBundle
+  }
+
+  val fromDataPath = new Bundle {
+    val resp: MixedVec[MixedVec[OGRespBundle]] = MixedVec(params.issueBlockParams.map(x => Flipped(x.genOGRespBundle)))
+    val og0Cancel = Input(ExuVec(backendParams.numExu))
+    // Todo: remove this after no cancel signal from og1
+    val og1Cancel = Input(ExuVec(backendParams.numExu))
+    // just be compatible to old code
+    def apply(i: Int)(j: Int) = resp(i)(j)
+  }
+
 
   val memIO = if (params.isMemSchd) Some(new Bundle {
-    val feedbackIO = Flipped(Vec(params.StaCnt, new MemRSFeedbackIO))
     val lsqEnqIO = Flipped(new LsqEnqIO)
   }) else None
   val fromMem = if (params.isMemSchd) Some(new Bundle {
+    val ldaFeedback = Flipped(Vec(params.LduCnt, new MemRSFeedbackIO))
+    val staFeedback = Flipped(Vec(params.StaCnt, new MemRSFeedbackIO))
     val stIssuePtr = Input(new SqPtr())
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
     val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
@@ -79,9 +112,9 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
   val io = IO(new SchedulerIO())
 
   // alias
+  private val iqWakeUpInMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =
+    io.fromSchedulers.wakeupVec.map(x => (x.bits.exuIdx, x)).toMap
   private val schdType = params.schdType
-  private val (numRfRead, numRfWrite) = params.numRfReadWrite.getOrElse((0, 0))
-  private val numPregs = params.numPregs
 
   // Modules
   val dispatch2Iq: Dispatch2IqImp = wrapper.dispatch2Iq.module
@@ -89,12 +122,12 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
 
   // BusyTable Modules
   val intBusyTable = schdType match {
-    case IntScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numIntStateRead, wrapper.numIntStateWrite)))
+    case IntScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numIntStateRead, wrapper.numIntStateWrite, IntPhyRegs)))
     case _ => None
   }
 
   val vfBusyTable = schdType match {
-    case VfScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numVfStateRead, wrapper.numVfStateWrite)))
+    case VfScheduler() | MemScheduler() => Some(Module(new BusyTable(dispatch2Iq.numVfStateRead, wrapper.numVfStateWrite, VfPhyRegs)))
     case _ => None
   }
 
@@ -131,7 +164,7 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     case None =>
   }
 
-  val wakeupFromWBVec = Wire(Vec(params.numWakeupFromWB, ValidIO(new IssueQueueWakeUpBundle(params.pregIdxWidth))))
+  val wakeupFromWBVec = Wire(params.genWBWakeUpSinkValidBundle)
   val writeback = params.schdType match {
     case IntScheduler() => io.intWriteBack
     case MemScheduler() => io.intWriteBack ++ io.vfWriteBack
@@ -146,15 +179,45 @@ abstract class SchedulerImpBase(wrapper: Scheduler)(implicit params: SchdBlockPa
     sink.bits.pdest := source.addr
   }
 
+  // Connect bundles having the same wakeup source
+  issueQueues.zipWithIndex.foreach { case(iq, i) =>
+    iq.io.wakeupFromIQ.foreach { wakeUp =>
+      wakeUp := iqWakeUpInMap(wakeUp.bits.exuIdx)
+    }
+    iq.io.og0Cancel := io.fromDataPath.og0Cancel
+    iq.io.og1Cancel := io.fromDataPath.og1Cancel
+    iq.io.fromCancelNetwork <> io.fromCancelNetwork(i)
+  }
+
+  private val iqWakeUpOutMap: Map[Int, ValidIO[IssueQueueIQWakeUpBundle]] =
+    issueQueues.flatMap(_.io.wakeupToIQ)
+      .map(x => (x.bits.exuIdx, x))
+      .toMap
+
+  // Connect bundles having the same wakeup source
+  io.toSchedulers.wakeupVec.foreach { wakeUp =>
+    wakeUp := iqWakeUpOutMap(wakeUp.bits.exuIdx)
+  }
+
   io.toDataPath.zipWithIndex.foreach { case (toDp, i) =>
     toDp <> issueQueues(i).io.deq
   }
+  io.toDataPathAfterDelay.zipWithIndex.foreach { case (toDpDy, i) =>
+    toDpDy <> issueQueues(i).io.deqDelay
+  }
+
+  println(s"[Scheduler] io.fromSchedulers.wakeupVec: ${io.fromSchedulers.wakeupVec.map(x => backendParams.getExuName(x.bits.exuIdx))}")
+  println(s"[Scheduler] iqWakeUpInKeys: ${iqWakeUpInMap.keys}")
+
+  println(s"[Scheduler] iqWakeUpOutKeys: ${iqWakeUpOutMap.keys}")
+  println(s"[Scheduler] io.toSchedulers.wakeupVec: ${io.toSchedulers.wakeupVec.map(x => backendParams.getExuName(x.bits.exuIdx))}")
 }
 
 class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBlockParams, p: Parameters)
   extends SchedulerImpBase(wrapper)
     with HasXSParameter
 {
+//  dontTouch(io.vfWbFuBusyTable)
   println(s"[SchedulerArithImp] " +
     s"has intBusyTable: ${intBusyTable.nonEmpty}, " +
     s"has vfBusyTable: ${vfBusyTable.nonEmpty}")
@@ -162,25 +225,34 @@ class SchedulerArithImp(override val wrapper: Scheduler)(implicit params: SchdBl
   issueQueues.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
     iq.io.enq <> dispatch2Iq.io.out(i)
-    iq.io.wakeup := wakeupFromWBVec
+    iq.io.wakeupFromWB := wakeupFromWBVec
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
-      deqResp.valid := iq.io.deq(j).valid
-      deqResp.bits.success := false.B
-      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.issueSuccess, RSFeedbackType.fuBusy)
+      deqResp.valid := iq.io.deq(j).valid && io.toDataPath(i)(j).ready
+      deqResp.bits.respType := RSFeedbackType.issueSuccess
       deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
+      deqResp.bits.rfWen := iq.io.deq(j).bits.common.rfWen.getOrElse(false.B)
+      deqResp.bits.fuType := iq.io.deq(j).bits.common.fuType
+
     }
     iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>
       og0Resp.valid := io.fromDataPath(i)(j).og0resp.valid
-      og0Resp.bits.success := false.B // Todo: remove it
       og0Resp.bits.respType := io.fromDataPath(i)(j).og0resp.bits.respType
       og0Resp.bits.addrOH := io.fromDataPath(i)(j).og0resp.bits.addrOH
+      og0Resp.bits.rfWen := io.fromDataPath(i)(j).og0resp.bits.rfWen
+      og0Resp.bits.fuType := io.fromDataPath(i)(j).og0resp.bits.fuType
+
     }
     iq.io.og1Resp.zipWithIndex.foreach { case (og1Resp, j) =>
       og1Resp.valid := io.fromDataPath(i)(j).og1resp.valid
-      og1Resp.bits.success := false.B
       og1Resp.bits.respType := io.fromDataPath(i)(j).og1resp.bits.respType
       og1Resp.bits.addrOH := io.fromDataPath(i)(j).og1resp.bits.addrOH
+      og1Resp.bits.rfWen := io.fromDataPath(i)(j).og1resp.bits.rfWen
+      og1Resp.bits.fuType := io.fromDataPath(i)(j).og1resp.bits.fuType
+
     }
+
+    iq.io.wbBusyTableRead := io.fromWbFuBusyTable.fuBusyTableRead(i)
+    io.wbFuBusyTable(i) := iq.io.wbBusyTableWrite
   }
 
   val iqJumpBundleVec: Seq[IssueQueueJumpBundle] = issueQueues.map {
@@ -205,42 +277,66 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
 
   val memAddrIQs = issueQueues.filter(iq => iq.params.StdCnt == 0)
   val stAddrIQs = issueQueues.filter(iq => iq.params.StaCnt > 0) // included in memAddrIQs
+  val ldAddrIQs = issueQueues.filter(iq => iq.params.LduCnt > 0)
   val stDataIQs = issueQueues.filter(iq => iq.params.StdCnt > 0)
   require(memAddrIQs.nonEmpty && stDataIQs.nonEmpty)
 
   issueQueues.zipWithIndex.foreach { case (iq, i) =>
     iq.io.deqResp.zipWithIndex.foreach { case (deqResp, j) =>
-      deqResp.valid := iq.io.deq(j).valid
-      deqResp.bits.success := false.B
-      deqResp.bits.respType := Mux(io.toDataPath(i)(j).ready, RSFeedbackType.issueSuccess, 0.U)
+      deqResp.valid := iq.io.deq(j).valid && io.toDataPath(i)(j).ready
+      deqResp.bits.respType := RSFeedbackType.issueSuccess
       deqResp.bits.addrOH := iq.io.deq(j).bits.addrOH
+      deqResp.bits.rfWen := iq.io.deq(j).bits.common.rfWen.getOrElse(false.B)
+      deqResp.bits.fuType := iq.io.deq(j).bits.common.fuType
+
     }
     iq.io.og0Resp.zipWithIndex.foreach { case (og0Resp, j) =>
       og0Resp.valid := io.fromDataPath(i)(j).og0resp.valid
-      og0Resp.bits.success := false.B // Todo: remove it
       og0Resp.bits.respType := io.fromDataPath(i)(j).og0resp.bits.respType
       og0Resp.bits.addrOH := io.fromDataPath(i)(j).og0resp.bits.addrOH
+      og0Resp.bits.rfWen := io.fromDataPath(i)(j).og0resp.bits.rfWen
+      og0Resp.bits.fuType := io.fromDataPath(i)(j).og0resp.bits.fuType
+
     }
     iq.io.og1Resp.zipWithIndex.foreach { case (og1Resp, j) =>
       og1Resp.valid := io.fromDataPath(i)(j).og1resp.valid
-      og1Resp.bits.success := false.B
       og1Resp.bits.respType := io.fromDataPath(i)(j).og1resp.bits.respType
       og1Resp.bits.addrOH := io.fromDataPath(i)(j).og1resp.bits.addrOH
+      og1Resp.bits.rfWen := io.fromDataPath(i)(j).og1resp.bits.rfWen
+      og1Resp.bits.fuType := io.fromDataPath(i)(j).og1resp.bits.fuType
+
     }
+    iq.io.wbBusyTableRead := io.fromWbFuBusyTable.fuBusyTableRead(i)
+    io.wbFuBusyTable(i) := iq.io.wbBusyTableWrite
   }
 
   memAddrIQs.zipWithIndex.foreach { case (iq, i) =>
     iq.io.flush <> io.fromCtrlBlock.flush
     iq.io.enq <> dispatch2Iq.io.out(i)
-    iq.io.wakeup := wakeupFromWBVec
+    iq.io.wakeupFromWB := wakeupFromWBVec
   }
 
+  ldAddrIQs.foreach {
+    case imp: IssueQueueMemAddrImp =>
+      imp.io.memIO.get.feedbackIO <> io.fromMem.get.ldaFeedback
+      imp.io.memIO.get.checkWait.memWaitUpdateReq := io.fromMem.get.memWaitUpdateReq
+    case _ =>
+  }
 
-  dispatch2Iq.io.out(1).zip(stAddrIQs(0).io.enq).zip(stDataIQs(0).io.enq).foreach{ case((di, staIQ), stdIQ) =>
-    val isAllReady = staIQ.ready && stdIQ.ready
-    di.ready := isAllReady
-    staIQ.valid := di.valid && isAllReady
-    stdIQ.valid := di.valid && isAllReady
+  stAddrIQs.foreach {
+    case imp: IssueQueueMemAddrImp => imp.io.memIO.get.feedbackIO <> io.fromMem.get.staFeedback
+    case _ =>
+  }
+
+  private val staIdxSeq = issueQueues.filter(iq => iq.params.StaCnt > 0).map(iq => iq.params.idxInSchBlk)
+
+  for ((idxInSchBlk, i) <- staIdxSeq.zipWithIndex) {
+    dispatch2Iq.io.out(idxInSchBlk).zip(stAddrIQs(i).io.enq).zip(stDataIQs(i).io.enq).foreach{ case((di, staIQ), stdIQ) =>
+      val isAllReady = staIQ.ready && stdIQ.ready
+      di.ready := isAllReady
+      staIQ.valid := di.valid && isAllReady
+      stdIQ.valid := di.valid && isAllReady
+    }
   }
 
   require(stAddrIQs.size == stDataIQs.size, s"number of store address IQs(${stAddrIQs.size}) " +
@@ -261,14 +357,8 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
       stdIQEnq.bits.psrc(0) := staIQEnq.bits.psrc(1)
       stdIQEnq.bits.sqIdx := staIQEnq.bits.sqIdx
     }
-    stdIQ.io.wakeup := wakeupFromWBVec
+    stdIQ.io.wakeupFromWB := wakeupFromWBVec
   }
-
-  val iqMemBundleVec = stAddrIQs.map {
-    case imp: IssueQueueMemAddrImp => imp.io.memIO
-    case _ => None
-  }.filter(_.nonEmpty).map(_.get)
-  println(s"[Scheduler] iqMemBundleVec: ${iqMemBundleVec}")
 
   val lsqEnqCtrl = Module(new LsqEnqCtrl)
 
@@ -279,10 +369,4 @@ class SchedulerMemImp(override val wrapper: Scheduler)(implicit params: SchdBloc
   lsqEnqCtrl.io.lqCancelCnt := io.fromMem.get.lqCancelCnt
   lsqEnqCtrl.io.sqCancelCnt := io.fromMem.get.sqCancelCnt
   io.memIO.get.lsqEnqIO <> lsqEnqCtrl.io.enqLsq
-  require(io.memIO.get.feedbackIO.size == iqMemBundleVec.map(_.feedbackIO.size).sum,
-    s"[SchedulerMemImp] io.memIO.feedbackIO.size(${io.memIO.get.feedbackIO.size}) " +
-      s"should be equal to sum of memIQ.io.feedbackIO.size(${iqMemBundleVec.map(_.feedbackIO.size).sum})")
-
-  val memIQFeedbackIO: Seq[MemRSFeedbackIO] = iqMemBundleVec.flatMap(_.feedbackIO)
-  io.memIO.get.feedbackIO <> memIQFeedbackIO
 }
