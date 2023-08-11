@@ -623,6 +623,8 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s2_pht_hit = Cat(s2_hit_vec).orR
   val s2_hist = Mux(s2_pht_hit, Mux1H(s2_hit_vec, s2_hist_update), s2_new_hist)
   val s2_repl_way_mask = UIntToOH(s2_replace_way)
+  val s2_incr_region_vaddr = s2_region_vaddr + 1.U
+  val s2_decr_region_vaddr = s2_region_vaddr - 1.U
 
   // pipe s3: send addr/data to ram, gen pf_req
   val s3_valid = RegNext(s2_valid, false.B)
@@ -643,6 +645,8 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s3_repl_way_mask = RegEnable(s2_repl_way_mask, s2_valid)
   val s3_repl_update_mask = RegEnable(VecInit((0 until PHT_SETS).map(i => i.U === s2_ram_waddr)), s2_valid)
   val s3_ram_waddr = RegEnable(s2_ram_waddr, s2_valid)
+  val s3_incr_region_vaddr = RegEnable(s2_incr_region_vaddr, s2_valid)
+  val s3_decr_region_vaddr = RegEnable(s2_decr_region_vaddr, s2_valid)
   s3_ram_en := s3_valid && s3_evict
   val s3_ram_wdata = Wire(new PhtEntry())
   s3_ram_wdata.hist := s3_hist
@@ -699,9 +703,7 @@ class PatternHistoryTable()(implicit p: Parameters) extends XSModule with HasSMS
   val s3_cur_region_valid =  s3_pf_gen_valid && (s3_hist_pf_gen & s3_hist_update_mask).orR
   val s3_incr_region_valid = s3_pf_gen_valid && (s3_hist_hi & (~s3_hist_update_mask.head(REGION_BLKS - 1)).asUInt).orR
   val s3_decr_region_valid = s3_pf_gen_valid && (s3_hist_lo & (~s3_hist_update_mask.tail(REGION_BLKS - 1)).asUInt).orR
-  val s3_incr_region_vaddr = s3_region_vaddr + 1.U
   val s3_incr_alias_bits = get_alias_bits(s3_incr_region_vaddr)
-  val s3_decr_region_vaddr = s3_region_vaddr - 1.U
   val s3_decr_alias_bits = get_alias_bits(s3_decr_region_vaddr)
   val s3_incr_region_paddr = Cat(
     s3_region_paddr(REGION_ADDR_BITS - 1, REGION_ADDR_PAGE_BIT),
@@ -827,6 +829,9 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val s1_hit = Wire(Bool())
   val s1_replace_vec = Wire(UInt(smsParams.pf_filter_size.W))
   val s1_tlb_fire_vec = Wire(UInt(smsParams.pf_filter_size.W))
+  val s2_valid = Wire(Bool())
+  val s2_replace_vec = Wire(UInt(smsParams.pf_filter_size.W))
+  val s2_tlb_fire_vec = Wire(UInt(smsParams.pf_filter_size.W))
 
   // s0: entries lookup
   val s0_gen_req = io.gen_req.bits
@@ -841,7 +846,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
 
   for(((v, ent), i) <- valids.zip(entries).zipWithIndex){
     val is_evicted = s1_valid && s1_replace_vec(i)
-    tlb_req_arb.io.in(i).valid := v && !s1_tlb_fire_vec(i) && !ent.paddr_valid && !is_evicted
+    tlb_req_arb.io.in(i).valid := v && !s1_tlb_fire_vec(i) && !s2_tlb_fire_vec(i) && !ent.paddr_valid && !is_evicted
     tlb_req_arb.io.in(i).bits.vaddr := Cat(ent.region_addr, 0.U(log2Up(REGION_SIZE).W))
     tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
     tlb_req_arb.io.in(i).bits.size := 3.U
@@ -898,12 +903,22 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   s1_alloc_entry.filter_bits := 0.U
   s1_alloc_entry.alias_bits := s1_gen_req.alias_bits
   s1_alloc_entry.debug_source_type := s1_gen_req.debug_source_type
+
+  // s2: tlb req will latch one cycle after tlb_arb
+  val s2_valid_r = RegNext(s1_valid, false.B)
+  val s2_replace_vec_r = RegNext(s1_replace_vec, 0.U.asTypeOf((s1_replace_vec)))
+  val s2_tlb_fire_vec_r = RegNext(s1_tlb_fire_vec, 0.U.asTypeOf(s1_tlb_fire_vec))
+  s2_valid := s2_valid_r
+  s2_replace_vec := s2_replace_vec_r
+  s2_tlb_fire_vec := s2_tlb_fire_vec_r.asUInt
+
   for(((v, ent), i) <- valids.zip(entries).zipWithIndex){
     val alloc = s1_valid && !s1_hit && s1_replace_vec(i)
     val update = s1_valid && s1_hit && s1_update_vec(i)
     // for pf: use s0 data
     val pf_fired = s0_pf_fire_vec(i)
-    val tlb_fired = s1_tlb_fire_vec(i) && !io.tlb_req.resp.bits.miss
+    val is_evicted = s2_valid && s2_replace_vec(i)
+    val tlb_fired = s2_tlb_fire_vec(i) && !io.tlb_req.resp.bits.miss && !is_evicted
     when(tlb_fired){
       ent.paddr_valid := !io.tlb_req.resp.bits.miss
       ent.region_addr := region_addr(io.tlb_req.resp.bits.paddr.head)
