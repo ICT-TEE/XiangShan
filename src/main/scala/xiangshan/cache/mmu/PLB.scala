@@ -107,7 +107,7 @@ class PLB (Width: Int = 4, EntrySize: Int = 8, FilterSize: Int = 5)(implicit p: 
     val hitvecreg = RegNext(hitvec)
 
     miss(i) := !(Cat(hitvec).orR)
-    resp(i) := RegNext(resp_data.asTypeOf(new PMPPerm))
+    resp(i) := resp_data.asTypeOf(new PMPPerm)
 
     when(!miss(i)){
       respvalid(i) := true.B //one cycle
