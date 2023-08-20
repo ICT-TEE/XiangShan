@@ -675,7 +675,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
       load_s1.io.in.valid && // valid load request
       !load_s1.io.s1_kill && // killed by load-load forwarding
       !load_s1.io.dtlbResp.bits.fast_miss && // not mmio or tlb miss, pf / af not included here
-      !io.lsq.forward.dataInvalidFast &&// forward failed
+      !io.lsq.forward.dataInvalidFast //&& forward failed
       //!load_s1.io.pmptable_miss
     ) &&
     !RegNext(load_s1.io.needLdVioCheckRedo) && // load-load violation check: load paddr cam struct hazard
