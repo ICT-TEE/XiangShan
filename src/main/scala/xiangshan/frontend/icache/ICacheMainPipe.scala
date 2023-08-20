@@ -300,7 +300,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** s1 control */
   val tlbRespAllValid = WireInit(false.B)
-  val pmpRespAllValid = WireInit(false.B)
 
   val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = tlb_miss_flush, lastFlush = false.B)
 
@@ -315,8 +314,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_tlb_latch_resp_pf = RegEnable(next = tlb_slot.tlb_resp_pf, enable = s0_fire)
   val s1_tlb_latch_resp_af = RegEnable(next = tlb_slot.tlb_resp_af, enable = s0_fire)
 
-  s1_ready := s2_ready && tlbRespAllValid && pmpRespAllValid  || !s1_valid
-  s1_fire  := s1_valid && tlbRespAllValid && pmpRespAllValid && s2_ready && !tlb_miss_flush
+  s1_ready := s2_ready && tlbRespAllValid || !s1_valid
+  s1_fire  := s1_valid && tlbRespAllValid && s2_ready && !tlb_miss_flush
 
   fromITLB.map(_.ready := true.B)
 
@@ -324,7 +323,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_tlb_all_resp_wire       =  RegNext(s0_fire)
   val s1_tlb_all_resp_reg        =  RegInit(false.B)
 
-  when(s1_valid && s1_tlb_all_resp_wire && !tlb_miss_flush && (!s2_ready || io.pmp.map(_.miss).reduce(_||_)))   {s1_tlb_all_resp_reg := true.B}
+  when(s1_valid && s1_tlb_all_resp_wire && !tlb_miss_flush && !s2_ready)   {s1_tlb_all_resp_reg := true.B}
   .elsewhen(s1_fire && s1_tlb_all_resp_reg)             {s1_tlb_all_resp_reg := false.B}
 
   tlbRespAllValid := s1_tlb_all_resp_wire || s1_tlb_all_resp_reg
@@ -381,8 +380,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     p.req.bits.cmd := TlbCmd.exec
   }
 
-  pmpRespAllValid := io.pmp.map(!_.miss).reduce(_&&_)
-
   /** <PERF> replace victim way number */
 
   (0 until nWays).map{ w =>
@@ -412,12 +409,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** s2 control */
   val s2_fetch_finish = Wire(Bool())
+  val pmpRespAllValid = WireInit(false.B)
 
   val s2_valid          = generatePipeControl(lastFire = s1_fire, thisFire = s2_fire, thisFlush = false.B, lastFlush = tlb_miss_flush)
   val s2_miss_available = Wire(Bool())
 
-  s2_ready      := (s2_valid && s2_fetch_finish && !io.respStall) || (!s2_valid && s2_miss_available)
-  s2_fire       := s2_valid && s2_fetch_finish && !io.respStall
+  s2_ready      := (s2_valid && s2_fetch_finish && pmpRespAllValid && !io.respStall) || (!s2_valid && s2_miss_available)
+  s2_fire       := s2_valid && s2_fetch_finish && pmpRespAllValid && !io.respStall
 
   /** s2 data */
   val mmio = fromPMP.map(port => port.mmio) // TODO: handle it
@@ -514,6 +512,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   //   p.req.bits.size := 3.U // TODO
   //   p.req.bits.cmd := TlbCmd.exec
   // }
+  pmpRespAllValid := io.pmp.map(!_.miss).reduce(_&&_)
 
   /*** cacheline miss logic ***/
   val wait_idle :: wait_queue_ready :: wait_send_req  :: wait_two_resp :: wait_0_resp :: wait_1_resp :: wait_one_resp ::wait_finish :: wait_pmp_except :: Nil = Enum(9)

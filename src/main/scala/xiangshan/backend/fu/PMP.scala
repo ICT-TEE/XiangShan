@@ -534,7 +534,7 @@ class PMPChecker
 (
   lgMaxSize: Int = 3,
   sameCycle: Boolean = false,
-  leaveHitMux: Boolean = false,
+  leaveHitMux: Boolean = true,
   pmpUsed: Boolean = true
 )(implicit p: Parameters) extends PMPModule
   with PMPCheckMethod
@@ -552,7 +552,7 @@ class PMPChecker
   val resp_pma = pma_check(req.cmd, res_pma.cfg)
   val resp = if (pmpUsed) (resp_pmp | resp_pma) else resp_pma
 
-  io.miss := false.B
+  io.miss := Mux(RegNext(io.req.valid), false.B, true.B)
 
   if (sameCycle || leaveHitMux) {
     io.resp := resp
@@ -567,7 +567,7 @@ class PMPChecker
     require(!(sameCycle && pmpUsed))
 
     val pmpt_hit = res_pmp.cfg.t && pmp_match_idx < 15.U && io.check_env.mode < 2.U
-    io.miss := false.B
+    io.miss := Mux(RegNext(io.req.valid), false.B, true.B)
 
     // hit pmptable
     when (pmpt_hit) {
@@ -581,9 +581,9 @@ class PMPChecker
       io.miss := io.plb.miss
     }
 
-    io.resp := Mux(RegNext(pmpt_hit && !io.miss),
-      RegNext(resp_pma) | pmp_check(req.cmd, io.plb.resp),     // plb resp
-      RegEnable(resp, io.req.valid))
+    io.resp := Mux(pmpt_hit,
+      resp_pma | pmp_check(req.cmd, io.plb.resp),     // plb resp
+      resp)
   }
 
   def getBaseAddr(cfgAddr: UInt, cfgMask: UInt): UInt = {
