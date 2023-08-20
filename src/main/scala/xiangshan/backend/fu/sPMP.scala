@@ -135,7 +135,8 @@ trait SPMPCheckMethod extends SPMPConst {
       BitPat("b0111_11") -> "b110".U,
       BitPat("b0111_0?") -> "b111".U,
 
-      BitPat("b1000_??") -> "b000".U, // reserved
+      BitPat("b1000_0?") -> "b000".U, // reserved, U
+      BitPat("b1000_1?") -> "b111".U, // S
 
       BitPat("b1001_1?") -> "b001".U,
       BitPat("b1001_0?") -> "b000".U,
