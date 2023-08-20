@@ -96,7 +96,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     val lsq = ValidIO(new LsPipelineBundle())
     val dtlbResp = Flipped(DecoupledIO(new TlbResp()))
     val rsFeedback = ValidIO(new RSFeedback)
-    val pmptable_miss = Input(Bool())
+    //val pmptable_miss = Input(Bool())
   })
 
   // mmio cbo decoder
@@ -116,10 +116,10 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   // Send TLB feedback to store issue queue
   // Store feedback is generated in store_s1, sent to RS in store_s2
   io.rsFeedback.valid := io.in.valid
-  io.rsFeedback.bits.hit := !(s1_tlb_miss || io.pmptable_miss)
+  io.rsFeedback.bits.hit := !(s1_tlb_miss)// || io.pmptable_miss)
   io.rsFeedback.bits.flushState := io.dtlbResp.bits.ptwBack
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
-  io.rsFeedback.bits.sourceType := Mux(s1_tlb_miss , RSFeedbackType.tlbMiss , RSFeedbackType.pmptable_miss)
+  io.rsFeedback.bits.sourceType := RSFeedbackType.tlbMiss 
   XSDebug(io.rsFeedback.valid,
     "S1 Store: tlbHit: %d robIdx: %d\n",
     io.rsFeedback.bits.hit,
@@ -155,6 +155,7 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val pmpResp = Flipped(new PMPRespBundle)
+    val pmptable_miss = Input(Bool())
     val static_pm = Input(Valid(Bool()))
     val out = Decoupled(new LsPipelineBundle)
   })
@@ -168,6 +169,13 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
 
   val s2_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
   val is_mmio = io.in.bits.mmio || pmp.mmio
+
+  io.rsFeedback.valid := io.in.valid
+  io.rsFeedback.bits.hit := !io.pmptable_miss
+  io.rsFeedback.bits.flushState := io.in.bits.ptwBack
+  io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
+  io.rsFeedback.bits.sourceType := RSFeedbackType.pmptable_miss
+  io.rsFeedback.bits.dataInvalidSqIdx := DontCare
 
   io.in.ready := true.B
   io.out.bits := io.in.bits
@@ -231,7 +239,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
-  store_s1.io.pmptable_miss := io.pmptable_miss
+  store_s1.io.pmptable_miss := io.pmptable_miss//todo
   store_s1.io.dtlbResp <> io.tlb.resp
   io.lsq <> store_s1.io.lsq
 
@@ -240,6 +248,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   // feedback tlb miss to RS in store_s2
   io.feedbackSlow.bits := RegNext(store_s1.io.rsFeedback.bits)
   io.feedbackSlow.valid := RegNext(store_s1.io.rsFeedback.valid && !store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
+
+  io.feedbackFast.bits := RegNext(store_s2.io.rsFeedback.bits)
+  io.feedbackFast.valid := RegNext(store_s2.io.rsFeedback.valid && !store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s2.io.pmpResp <> io.pmp
   store_s2.io.static_pm := RegNext(io.tlb.resp.bits.static_pm)

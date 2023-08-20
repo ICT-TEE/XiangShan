@@ -413,6 +413,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
 
     stu.io.redirect     <> redirect
     stu.io.feedbackSlow <> io.rsfeedback(exuParameters.LduCnt + i).feedbackSlow
+    stu.io.feedbackFast <> io.rsfeedback(exuParameters.LduCnt + i).feedbackFast
     stu.io.rsIdx        <> io.rsfeedback(exuParameters.LduCnt + i).rsIdx
     // NOTE: just for dtlb's perf cnt
     stu.io.isFirstIssue <> io.rsfeedback(exuParameters.LduCnt + i).isFirstIssue
@@ -425,7 +426,7 @@ class MemBlockImp(outer: MemBlock) extends LazyModuleImp(outer)
     stu.io.pmptable_miss          <> pmp_check(i+ld_tlb_ports).miss
 
     // store unit does not need fast feedback
-    io.rsfeedback(exuParameters.LduCnt + i).feedbackFast := DontCare
+    //io.rsfeedback(exuParameters.LduCnt + i).feedbackFast := DontCare
 
     // Lsq to sta unit
     lsq.io.storeMaskIn(i) <> stu.io.storeMaskOut
