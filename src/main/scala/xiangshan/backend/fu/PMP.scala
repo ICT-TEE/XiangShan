@@ -552,7 +552,7 @@ class PMPChecker
   val resp_pma = pma_check(req.cmd, res_pma.cfg)
   val resp = if (pmpUsed) (resp_pmp | resp_pma) else resp_pma
 
-  io.miss := Mux(RegNext(io.req.valid), false.B, true.B)
+  io.miss := false.B
 
   if (sameCycle || leaveHitMux) {
     io.resp := resp
@@ -567,7 +567,7 @@ class PMPChecker
     require(!(sameCycle && pmpUsed))
 
     val pmpt_hit = res_pmp.cfg.t && pmp_match_idx < 15.U && io.check_env.mode < 2.U
-    io.miss := Mux(RegNext(io.req.valid), false.B, true.B)
+    io.miss := false.B
 
     // hit pmptable
     when (pmpt_hit) {
