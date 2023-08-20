@@ -158,7 +158,7 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
     val pmptable_miss = Input(Bool())
     val static_pm = Input(Valid(Bool()))
     val out = Decoupled(new LsPipelineBundle)
-    val rsFeedback = ValidIO(new RSFeedback)
+    //val rsFeedback = ValidIO(new RSFeedback)
   })
   val pmp = WireInit(io.pmpResp)
   when (io.static_pm.valid) {
@@ -248,11 +248,14 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   // feedback tlb miss to RS in store_s2
-  io.feedbackSlow.bits := RegNext(store_s1.io.rsFeedback.bits)
-  io.feedbackSlow.valid := RegNext(store_s1.io.rsFeedback.valid && !store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
+  val tlbmiss_replay = RegNext(store_s1.io.rsFeedback.bits)
+  val tlbmiss_replay_valid = RegNext(store_s1.io.rsFeedback.valid && !store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
+  val pmptable_replay = store_s2.io.rsFeedback.bits
+  val pmptable_replay_valid = store_s2.io.rsFeedback.valid && !store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect)
+  
+  io.feedbackSlow.bits := Mux(tlbmiss_replay_valid, tlbmiss_replay, pmptable_replay)
+  io.feedbackSlow.valid := tlbmiss_replay_valid || ((!tlbmiss_replay_valid) && pmptable_replay_valid)
 
-  io.feedbackFast.bits := RegNext(store_s2.io.rsFeedback.bits)
-  io.feedbackFast.valid := RegNext(store_s2.io.rsFeedback.valid && !store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   store_s2.io.pmptable_miss := io.pmptable_miss
   store_s2.io.pmpResp <> io.pmp
