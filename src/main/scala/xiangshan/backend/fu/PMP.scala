@@ -461,11 +461,13 @@ trait PMPCheckMethod extends PMPConst {
     match_vec(num) := true.B
     cfg_vec(num) := pmpDefault
 
-    (if (leaveHitMux) {
-      ParallelPriorityMux(match_vec.map(RegEnable(_, init = false.B, valid)), RegEnable(cfg_vec, valid))
+    if (leaveHitMux) {
+      (ParallelPriorityMux(match_vec.map(RegEnable(_, init = false.B, valid)), RegEnable(cfg_vec, valid)),
+      ParallelPriorityEncoder(match_vec.map(RegEnable(_, init = false.B, valid))))
     } else {
-      ParallelPriorityMux(match_vec, cfg_vec)
-    }, ParallelPriorityEncoder(match_vec))
+      (ParallelPriorityMux(match_vec, cfg_vec),
+      ParallelPriorityEncoder(match_vec))
+    }
   }
 }
 
@@ -572,7 +574,7 @@ class PMPChecker
     // hit pmptable
     when (pmpt_hit) {
       io.plb.req.valid := true.B
-      io.plb.req.bits.offset := req.addr - Mux(
+      io.plb.req.bits.offset := RegEnable(req.addr, io.req.valid) - Mux(
         res_pmp.cfg.tor,
         Mux(pmp_match_idx === 0.U, 0.U, io.check_env.pmp(pmp_match_idx - 1.U).addr << 2.U),
         getBaseAddr(res_pmp.addr, res_pmp.mask))
