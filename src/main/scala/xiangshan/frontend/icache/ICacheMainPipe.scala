@@ -374,7 +374,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   //send physical address to PMP
   io.pmp.zipWithIndex.map { case (p, i) =>
     // p.req.valid := s1_valid && !tlb_miss_flush && !missSwitchBit
-    p.req.valid := RegNext(s0_fire) && !tlb_miss_flush && !missSwitchBit
+    p.req.valid := s1_fire
     p.req.bits.addr := s1_req_paddr(i)
     p.req.bits.size := 3.U
     p.req.bits.cmd := TlbCmd.exec
@@ -497,7 +497,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_except_pf        = RegEnable(tlbExcpPF, s1_fire)
   val s2_except_tlb_af    = RegEnable(tlbExcpAF, s1_fire)
   //long delay exception signal
-  val s2_except_pmp_af    =  DataHoldBypass(pmpExcpAF, RegNext(s1_fire))
+  val s2_except_pmp_af    = Seq.fill(2)(WireInit(false.B)) //DataHoldBypass(pmpExcpAF, RegNext(s1_fire))
   // val s2_except_parity_af =  VecInit(s2_parity_error(i) && RegNext(RegNext(s1_fire))                      )
 
   val s2_except    = VecInit((0 until 2).map{i => s2_except_pf(i) || s2_except_tlb_af(i)})
@@ -833,7 +833,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toIFU(i).bits.paddr     := s2_req_paddr(i)
     toIFU(i).bits.vaddr     := s2_req_vaddr(i)
     toIFU(i).bits.tlbExcp.pageFault     := s2_except_pf(i)
-    toIFU(i).bits.tlbExcp.accessFault   := s2_except_tlb_af(i) || missSlot(i).m_corrupt || s2_except_pmp_af(i)
+    toIFU(i).bits.tlbExcp.accessFault   := s2_except_tlb_af(i) || missSlot(i).m_corrupt || pmpExcpAF(i)
     toIFU(i).bits.tlbExcp.mmio          := s2_mmio
 
     when(RegNext(s2_fire && missSlot(i).m_corrupt)){
