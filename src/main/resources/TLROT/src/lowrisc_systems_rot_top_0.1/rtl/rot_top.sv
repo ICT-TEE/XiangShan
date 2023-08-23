@@ -249,7 +249,7 @@ module rot_top #(
 
   // assign unused_intr_vector = ^ intr_vector;
 
-  // assign kmac_app_req[2] = kmac_app_req_lc;
+  assign kmac_app_req[2] = kmac_pkg::APP_REQ_DEFAULT;
   // assign kmac_app_rsp_lc = kmac_app_rsp[2]; 
 
   // assign csrng_csrng_cmd_req[1] = rot_top_csrng_csrng_cmd_req;
