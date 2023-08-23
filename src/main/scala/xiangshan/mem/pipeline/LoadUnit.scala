@@ -680,6 +680,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper with 
     ) &&
     !RegNext(load_s1.io.needLdVioCheckRedo) && // load-load violation check: load paddr cam struct hazard
     !RegNext(load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect)) &&
+    !io.pmptable_miss &&
     s2_dcache_hit // dcache hit in lsu side
 
   io.fastUop.bits := RegNext(load_s1.io.out.bits.uop)
