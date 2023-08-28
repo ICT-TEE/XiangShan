@@ -463,7 +463,8 @@ trait PMPCheckMethod extends PMPConst {
 
     if (leaveHitMux) {
       (ParallelPriorityMux(match_vec.map(RegEnable(_, init = false.B, valid)), RegEnable(cfg_vec, valid)),
-      ParallelPriorityEncoder(match_vec.map(RegEnable(_, init = false.B, valid))))
+      // ParallelPriorityEncoder(match_vec.map(RegEnable(_, init = false.B, valid))))
+      ParallelPriorityEncoder(match_vec))
     } else {
       (ParallelPriorityMux(match_vec, cfg_vec),
       ParallelPriorityEncoder(match_vec))
@@ -568,17 +569,20 @@ class PMPChecker
   if (EnablePMPTable && pmpUsed) {
     require(!(sameCycle && pmpUsed))
 
-    val pmpt_hit = res_pmp.cfg.t && pmp_match_idx < 15.U && io.check_env.mode < 2.U
+    val pmpt_hit = res_pmp.cfg.t && RegNext(pmp_match_idx) < 15.U && io.check_env.mode < 2.U
     io.miss := false.B
+
+    val addr_tor = RegNext(io.check_env.pmp(pmp_match_idx - 1.U).addr << 2.U)
+    val addr_next = RegNext(io.check_env.pmp(pmp_match_idx + 1.U).addr)
 
     // hit pmptable
     when (pmpt_hit) {
       io.plb.req.valid := true.B
       io.plb.req.bits.offset := RegEnable(req.addr, io.req.valid) - Mux(
         res_pmp.cfg.tor,
-        Mux(pmp_match_idx === 0.U, 0.U, io.check_env.pmp(pmp_match_idx - 1.U).addr << 2.U),
+        Mux(RegNext(pmp_match_idx) === 0.U, 0.U, addr_tor),
         getBaseAddr(res_pmp.addr, res_pmp.mask))
-      io.plb.req.bits.patp := io.check_env.pmp(pmp_match_idx + 1.U).addr
+      io.plb.req.bits.patp := addr_next
 
       io.miss := io.plb.miss
     }
