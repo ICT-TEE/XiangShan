@@ -104,21 +104,21 @@ class PLB (Width: Int = 4, EntrySize: Int = 8, FilterSize: Int = 5)(implicit p: 
     //val hitvec = VecInit((entries.zipWithIndex).zip (v zip refill_mask.asBools).map{case (e, m) => e._1.hit(offset, ppn, asid, true) && m._1 && !m._2})
     val hitvec = VecInit((entries.zipWithIndex).zip (v).map{case (e, m) => e._1.hit(offset, ppn, io.csr.satp.asid, true) && m })
     val resp_data = ParallelMux(hitvec zip entries.map(_.gen_resp(offset)))
-    val hitvecreg = RegNext(hitvec)
+    //val hitvecreg = RegNext(hitvec)
 
     miss(i) := !(Cat(hitvec).orR)
     resp(i) := resp_data.asTypeOf(new PMPPerm)
 
-    when(!miss(i)){
+    /*when(!miss(i)){
       respvalid(i) := true.B //one cycle
     }.otherwise{
       respvalid(i) := false.B
-    }
+    }*/
 
-    //update replace_way
+    //read update replace_way
     access.sets := 0.U// no use
-    access.touch_ways.valid := respvalid(i) && Cat(hitvecreg).orR
-    access.touch_ways.bits := OHToUInt(hitvecreg)
+    access.touch_ways.valid := req(i).valid && Cat(hitvec).orR
+    access.touch_ways.bits := OHToUInt(hitvec)
   }
 
 //sfence
