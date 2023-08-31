@@ -435,6 +435,7 @@ trait PMPCheckMethod extends PMPConst {
 
     val passThrough = if (pmpEntries.isEmpty) true.B else (mode > 1.U)
     val pmpDefault = WireInit(0.U.asTypeOf(new PMPEntry()))
+    pmpDefault.addr := 0.U
     pmpDefault.cfg.r := passThrough
     pmpDefault.cfg.w := passThrough
     pmpDefault.cfg.x := passThrough
@@ -451,6 +452,13 @@ trait PMPCheckMethod extends PMPConst {
       cur.cfg.r := aligned && (pmp.cfg.r || ignore)
       cur.cfg.w := aligned && (pmp.cfg.w || ignore)
       cur.cfg.x := aligned && (pmp.cfg.x || ignore)
+
+      val base_addr = Mux(
+        pmp.cfg.tor,
+        last_pmp.addr << 2.U,
+        Cat((pmp.addr & ~(pmp.mask >> 3.U))>> 10.U, 0.U(12.W)))
+
+      cur.addr := addr - base_addr
 
 //      Mux(is_match, cur, prev)
       match_vec(i) := is_match
@@ -572,10 +580,7 @@ class PMPChecker
     // hit pmptable
     when (pmpt_hit) {
       io.plb.req.valid := true.B
-      io.plb.req.bits.offset := RegEnable(req.addr, io.req.valid) - Mux(
-        res_pmp.cfg.tor,
-        RegEnable(Mux(pmp_match_idx === 0.U, 0.U, io.check_env.pmp(pmp_match_idx - 1.U).addr << 2.U), io.req.valid),
-        getBaseAddr(res_pmp.addr, res_pmp.mask))
+      io.plb.req.bits.offset := res_pmp.addr  // 34.W offset
       io.plb.req.bits.patp := RegEnable(io.check_env.pmp(pmp_match_idx + 1.U).addr, io.req.valid)
 
       io.miss := io.plb.miss
@@ -586,10 +591,10 @@ class PMPChecker
       resp)
   }
 
-  def getBaseAddr(cfgAddr: UInt, cfgMask: UInt): UInt = {
-    val base = cfgAddr & ~(cfgMask >> 3.U)
-    Cat(base >> 10.U, 0.U(12.W))
-  }
+  // def getBaseAddr(cfgAddr: UInt, cfgMask: UInt): UInt = {
+  //   val base = cfgAddr & ~(cfgMask >> 3.U)
+  //   Cat(base >> 10.U, 0.U(12.W))
+  // }
 }
 
 /* get config with check */
