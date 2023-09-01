@@ -1,5 +1,6 @@
 
-// `include "/nfs/home/zhangdongrong/thinclient_drives/xs-env/XiangShan/src/main/resources/TLROT/lowrisc_dv_rot_top_verilator_sim_0.1.f"
+// `include "/nfs/home/zhangdongrong/thinclient_drives/xs-env/XiangShan/src/
+// main/resources/TLROT/lowrisc_dv_rot_top_verilator_sim_0.1.f"
 import tlul_pkg::*;
 
 module TLROT_top (
@@ -22,7 +23,25 @@ module TLROT_top (
     output [7:0]   d_bits_source,
     output         d_bits_sink,
     output [31:0]  d_bits_data,
-    output         d_bits_denied
+    output         d_bits_denied,
+
+    output logic intr_hmac_hmac_done_o,
+    output logic intr_hmac_fifo_empty_o,
+    output logic intr_hmac_hmac_err_o,
+    output logic intr_kmac_kmac_done_o,
+    output logic intr_kmac_fifo_empty_o,
+    output logic intr_kmac_kmac_err_o,
+    output logic intr_keymgr_op_done_o,
+    output logic intr_csrng_cs_cmd_req_done_o,
+    output logic intr_csrng_cs_entropy_req_o,
+    output logic intr_csrng_cs_hw_inst_exc_o,
+    output logic intr_csrng_cs_fatal_err_o,
+    output logic intr_entropy_src_es_entropy_valid_o,
+    output logic intr_entropy_src_es_health_test_failed_o,
+    output logic intr_entropy_src_es_observe_fifo_ready_o,
+    output logic intr_entropy_src_es_fatal_err_o,
+    output logic intr_edn0_edn_cmd_req_done_o,
+    output logic intr_edn0_edn_fatal_err_o
 );
 
 tlul_pkg::tl_h2d_t tl_i;
@@ -30,6 +49,22 @@ tlul_pkg::tl_d2h_t tl_o;
 logic clk_edn_i;
 logic rst_edn_ni;
 logic rst_shadowed_ni;
+
+
+
+// always_comb begin
+//   if (a_bits_opcode == 3'b001 && 
+//       (a_bits_mask == 4'hf || a_bits_mask == 4'h0)) begin
+//     tl_i.a_opcode = 3'b000; 
+//     tl_i.a_mask = 4'hf;
+//   end else if (a_bits_opcode == 3'b100) begin
+//     tl_i.a_opcode = 3'b100; 
+//     tl_i.a_mask = 4'hf;
+//   end else begin
+//     tl_i.a_opcode = a_bits_opcode;
+//     tl_i.a_mask = a_bits_mask; 
+//   end
+// end
 
 assign tl_i.a_valid = a_valid;
 assign tl_i.a_opcode = a_bits_opcode;  
@@ -65,7 +100,25 @@ rot_top u_rot_top (
     .rst_edn_ni(~rst_ni),
 
     .tl_i(tl_i),
-    .tl_o(tl_o) 
+    .tl_o(tl_o),
+
+    .intr_hmac_hmac_done_o(intr_hmac_hmac_done_o),
+    .intr_hmac_fifo_empty_o(intr_hmac_fifo_empty_o),  
+    .intr_hmac_hmac_err_o(intr_hmac_hmac_err_o),
+    .intr_kmac_kmac_done_o(intr_kmac_kmac_done_o),
+    .intr_kmac_fifo_empty_o(intr_kmac_fifo_empty_o),
+    .intr_kmac_kmac_err_o(intr_kmac_kmac_err_o),
+    .intr_keymgr_op_done_o(intr_keymgr_op_done_o),
+    .intr_csrng_cs_cmd_req_done_o(intr_csrng_cs_cmd_req_done_o),
+    .intr_csrng_cs_entropy_req_o(intr_csrng_cs_entropy_req_o),  
+    .intr_csrng_cs_hw_inst_exc_o(intr_csrng_cs_hw_inst_exc_o),
+    .intr_csrng_cs_fatal_err_o(intr_csrng_cs_fatal_err_o),
+    .intr_entropy_src_es_entropy_valid_o(intr_entropy_src_es_entropy_valid_o),
+    .intr_entropy_src_es_health_test_failed_o(intr_entropy_src_es_health_test_failed_o),  
+    .intr_entropy_src_es_observe_fifo_ready_o(intr_entropy_src_es_observe_fifo_ready_o),
+    .intr_entropy_src_es_fatal_err_o(intr_entropy_src_es_fatal_err_o),
+    .intr_edn0_edn_cmd_req_done_o(intr_edn0_edn_cmd_req_done_o),
+    .intr_edn0_edn_fatal_err_o(intr_edn0_edn_fatal_err_o)
 );
     
 endmodule

@@ -12,38 +12,29 @@ import freechips.rocketchip.tilelink._
 import chisel3.experimental._
 import freechips.rocketchip.regmapper.{RegField, RegFieldAccessType, RegFieldDesc, RegFieldGroup}
 
-class TlH2d(val TL_AW: Int = 32,
-           val TL_DW: Int = 32,
-           val TL_AIW: Int = 8,
-           val TL_DIW: Int = 1,
-           val TL_DBW: Int = 4,
-           val TL_SZW: Int = 2) extends Bundle {
-  val a_valid = Input(Bool())
-  val a_opcode = Input(UInt(3.W))
-  val a_param = Input(UInt(3.W))
-  val a_size = Input(UInt(TL_SZW.W))
-  val a_source = Input(UInt(TL_AIW.W))
-  val a_address = Input(UInt(TL_AW.W))
-  val a_mask = Input(UInt(TL_DBW.W))
-  val a_data = Input(UInt(TL_DW.W))
-  val d_ready = Output(Bool())
-}
+class interruptIO extends Bundle{
+    val intr_hmac_hmac_done_o = Output(Bool())
+    val intr_hmac_fifo_empty_o = Output(Bool())  
+    val intr_hmac_hmac_err_o = Output(Bool())
 
-class TlD2h(val TL_AW: Int = 32,
-           val TL_DW: Int = 32,
-           val TL_AIW: Int = 8,
-           val TL_DIW: Int = 1,
-           val TL_DBW: Int = 4,
-           val TL_SZW: Int = 2) extends Bundle {
-  val d_valid = Output(Bool())
-  val d_opcode = Output(UInt(3.W))
-  val d_param = Output(UInt(3.W))
-  val d_size = Output(UInt(TL_SZW.W))
-  val d_source = Output(UInt(TL_AIW.W))
-  val d_sink = Output(UInt(TL_DIW.W))
-  val d_data = Output(UInt(TL_DW.W))
-  val d_error = Output(Bool())
-  val a_ready = Input(Bool())
+    val intr_kmac_kmac_done_o = Output(Bool())
+    val intr_kmac_fifo_empty_o = Output(Bool())
+    val intr_kmac_kmac_err_o = Output(Bool())
+
+    val intr_keymgr_op_done_o = Output(Bool())
+
+    val intr_csrng_cs_cmd_req_done_o = Output(Bool())
+    val intr_csrng_cs_entropy_req_o = Output(Bool())
+    val intr_csrng_cs_hw_inst_exc_o = Output(Bool())
+    val intr_csrng_cs_fatal_err_o = Output(Bool())
+
+    val intr_entropy_src_es_entropy_valid_o = Output(Bool())
+    val intr_entropy_src_es_health_test_failed_o = Output(Bool())
+    val intr_entropy_src_es_observe_fifo_ready_o = Output(Bool())
+    val intr_entropy_src_es_fatal_err_o = Output(Bool())
+
+    val intr_edn0_edn_cmd_req_done_o = Output(Bool())
+    val intr_edn0_edn_fatal_err_o = Output(Bool())
 }
 
 
@@ -100,6 +91,29 @@ class TLROT_top extends BlackBox with HasBlackBoxResource {
     val d_bits_data = Output(TL_DW)
     val d_bits_denied = Output(Bool())
     val d_ready = Input(Bool())
+
+    val intr_hmac_hmac_done_o = Output(Bool())
+    val intr_hmac_fifo_empty_o = Output(Bool())  
+    val intr_hmac_hmac_err_o = Output(Bool())
+
+    val intr_kmac_kmac_done_o = Output(Bool())
+    val intr_kmac_fifo_empty_o = Output(Bool())
+    val intr_kmac_kmac_err_o = Output(Bool())
+
+    val intr_keymgr_op_done_o = Output(Bool())
+
+    val intr_csrng_cs_cmd_req_done_o = Output(Bool())
+    val intr_csrng_cs_entropy_req_o = Output(Bool())
+    val intr_csrng_cs_hw_inst_exc_o = Output(Bool())
+    val intr_csrng_cs_fatal_err_o = Output(Bool())
+
+    val intr_entropy_src_es_entropy_valid_o = Output(Bool())
+    val intr_entropy_src_es_health_test_failed_o = Output(Bool())
+    val intr_entropy_src_es_observe_fifo_ready_o = Output(Bool())
+    val intr_entropy_src_es_fatal_err_o = Output(Bool())
+
+    val intr_edn0_edn_cmd_req_done_o = Output(Bool())
+    val intr_edn0_edn_fatal_err_o = Output(Bool())
   })
 
   addResource("/TLROT/TLROT_top.sv")
@@ -110,7 +124,7 @@ class TLROT_top extends BlackBox with HasBlackBoxResource {
 
 class TLROT_blackbox(implicit p: Parameters) extends LazyModule {
   // val device = new SimpleDevice("tlrot", Seq("sifive,dtim0"))
-  val beatBytes = 8
+  val beatBytes = 4
   // val mem = SyncReadMem(0x1000, UInt(32.W))
   // val regmap = RegField.map("mem" -> mem)
 
@@ -148,16 +162,40 @@ class TLROT_blackbox(implicit p: Parameters) extends LazyModule {
     val io_rot = IO(new Bundle { 
       val clock = Input(Clock())
       val reset = Input(AsyncReset())
+      val intr = Output(Vec(17,Bool()))
+      // val intr = Output(new interruptIO)
+
+      // val intr_hmac_hmac_done_o = Output(Bool())
+      // val intr_hmac_fifo_empty_o = Output(Bool())  
+      // val intr_hmac_hmac_err_o = Output(Bool())
+
+      // val intr_kmac_kmac_done_o = Output(Bool())
+      // val intr_kmac_fifo_empty_o = Output(Bool())
+      // val intr_kmac_kmac_err_o = Output(Bool())
+
+      // val intr_keymgr_op_done_o = Output(Bool())
+
+      // val intr_csrng_cs_cmd_req_done_o = Output(Bool())
+      // val intr_csrng_cs_entropy_req_o = Output(Bool())
+      // val intr_csrng_cs_hw_inst_exc_o = Output(Bool())
+      // val intr_csrng_cs_fatal_err_o = Output(Bool())
+
+      // val intr_entropy_src_es_entropy_valid_o = Output(Bool())
+      // val intr_entropy_src_es_health_test_failed_o = Output(Bool())
+      // val intr_entropy_src_es_observe_fifo_ready_o = Output(Bool())
+      // val intr_entropy_src_es_fatal_err_o = Output(Bool())
+
+      // val intr_edn0_edn_cmd_req_done_o = Output(Bool())
+      // val intr_edn0_edn_fatal_err_o = Output(Bool())
   })
     val (in, edge) = node.in(0)
     dontTouch(in)
     dontTouch(io_rot.reset)
 
-    
     // val rot = withClock(clock) {
     //   // val tlrot = Module(new TLROT)
     //    Module(new TLROT)
-    //  }
+    //  }    
     val tlrot = Module(new TLROT_top)
     in.a.ready := tlrot.io.a_ready
     // tlrot.io.a_ready := in.a.ready
@@ -182,6 +220,31 @@ class TLROT_blackbox(implicit p: Parameters) extends LazyModule {
     in.d.bits.sink := tlrot.io.d_bits_sink
     in.d.bits.data := tlrot.io.d_bits_data
     in.d.bits.denied := tlrot.io.d_bits_denied
+
+   
+    io_rot.intr(0) := tlrot.io.intr_hmac_hmac_done_o
+    io_rot.intr(1) := tlrot.io.intr_hmac_fifo_empty_o
+    io_rot.intr(2) := tlrot.io.intr_hmac_hmac_err_o
+
+    io_rot.intr(3) := tlrot.io.intr_kmac_kmac_done_o
+    io_rot.intr(4) := tlrot.io.intr_kmac_fifo_empty_o
+    io_rot.intr(5) := tlrot.io.intr_kmac_kmac_err_o
+
+    io_rot.intr(6) := tlrot.io.intr_keymgr_op_done_o
+
+    io_rot.intr(7) := tlrot.io.intr_csrng_cs_cmd_req_done_o
+    io_rot.intr(8) := tlrot.io.intr_csrng_cs_entropy_req_o
+    io_rot.intr(9) := tlrot.io.intr_csrng_cs_hw_inst_exc_o
+    io_rot.intr(10) := tlrot.io.intr_csrng_cs_fatal_err_o
+
+    io_rot.intr(11) := tlrot.io.intr_entropy_src_es_entropy_valid_o
+    io_rot.intr(12) := tlrot.io.intr_entropy_src_es_health_test_failed_o
+    io_rot.intr(13) := tlrot.io.intr_entropy_src_es_observe_fifo_ready_o
+    io_rot.intr(14) := tlrot.io.intr_entropy_src_es_fatal_err_o
+
+    io_rot.intr(15) := tlrot.io.intr_edn0_edn_cmd_req_done_o
+    io_rot.intr(16) := tlrot.io.intr_edn0_edn_fatal_err_o
+
 
     // in.a <> tlrot.io.tl_i
     // in.d <> tlrot.io.tl_o

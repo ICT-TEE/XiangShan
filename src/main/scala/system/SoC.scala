@@ -259,16 +259,23 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   val clint = LazyModule(new CLINT(CLINTParams(0x38000000L), 8))
   clint.node := peripheralXbar
 
-  class IntSourceNodeToModule(val num: Int)(implicit p: Parameters) extends LazyModule {
-    val sourceNode = IntSourceNode(IntSourcePortSimple(num, ports = 1, sources = 1))
+  class IntSourceNodeToModule(val num: Int, val rot_num: Int)(implicit p: Parameters) extends LazyModule {
+    val sourceNode = IntSourceNode(IntSourcePortSimple(num+rot_num, ports = 1, sources = 1))
+    
     lazy val module = new LazyModuleImp(this){
+      val (regular, rot) = sourceNode.out.head._1.splitAt(num)
       val in = IO(Input(Vec(num, Bool())))
-      in.zip(sourceNode.out.head._1).foreach{ case (i, s) => s := i }
+      in.zip(regular).foreach{ case (i, s) => s := i }
+      // in.zip(sourceNode.out.head._1).foreach{ case (i, s) => s := i }
+
+      val rot_in = IO(Input(Vec(rot_num, Bool())))
+      rot_in.zip(rot).foreach{ case (i, s) => s := i }
     }
   }
 
+  val tlrot_intr = 17
   val plic = LazyModule(new TLPLIC(PLICParams(0x3c000000L), 8))
-  val plicSource = LazyModule(new IntSourceNodeToModule(NrExtIntr))
+  val plicSource = LazyModule(new IntSourceNodeToModule(NrExtIntr, tlrot_intr))
 
   plic.intnode := plicSource.sourceNode
   plic.node := peripheralXbar
@@ -284,8 +291,23 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   // val tlrot = LazyModule(new TLROT_test)
   // tlrot.node := peripheralXbar
   
-  val tlrot_b = LazyModule(new TLROT_blackbox)
-  tlrot_b.node := peripheralXbar
+  val tlrot = LazyModule(new TLROT_blackbox)
+  tlrot.node := TLFragmenter(4, 8) := TLWidthWidget(8) :=  peripheralXbar
+
+  
+  // val plicSource_rot = LazyModule(new IntSourceNodeToModule(tlrot_intr))
+
+  // val plicMergeSource = LazyModule(new IntSourceNodeToModule(plicSource.num + plicSource_rot.num))
+  // plicMergeSource.sourceNode := plicSource.sourceNode
+  // plicMergeSource.sourceNode := plicSource_rot.sourceNode
+  // plic.intnode := plicMergeSource.sourceNode
+  // plic.intnode := plicSource_rot.sourceNode
+  // plicSource_rot.module.in := tlrot.module.io_rot.intr
+
+  // plicMergeSource.module.in.zip(tlrot.module.io_rot.intr).foreach{
+  //   case(i,s) => i := s
+  // }
+ 
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   debugModule.debug.node := peripheralXbar
@@ -306,8 +328,8 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
 
-    tlrot_b.module.io_rot.clock := clock
-    tlrot_b.module.io_rot.reset := reset
+    tlrot.module.io_rot.clock := clock
+    tlrot.module.io_rot.reset := reset
 
     debugModule.module.io <> debug_module_io
 
@@ -320,6 +342,10 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     }
 
     pma.module.io <> cacheable_check
+    require(plicSource.module.rot_in.length == tlrot_intr) 
+    for ((plic_in, interrupt) <- plicSource.module.rot_in.zip(tlrot.module.io_rot.intr)) {
+      plic_in := interrupt
+    }
 
     val freq = 100
     val cnt = RegInit((freq - 1).U)
