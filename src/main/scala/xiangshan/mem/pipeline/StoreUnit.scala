@@ -96,7 +96,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
     val lsq = ValidIO(new LsPipelineBundle())
     val dtlbResp = Flipped(DecoupledIO(new TlbResp()))
     val rsFeedback = ValidIO(new RSFeedback)
-    val pmptable_miss = Input(Bool())
+    //val pmptable_miss = Input(Bool())
   })
 
   // mmio cbo decoder
@@ -116,10 +116,10 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
   // Send TLB feedback to store issue queue
   // Store feedback is generated in store_s1, sent to RS in store_s2
   io.rsFeedback.valid := io.in.valid
-  io.rsFeedback.bits.hit := !(s1_tlb_miss || io.pmptable_miss)
+  io.rsFeedback.bits.hit := !(s1_tlb_miss)// || io.pmptable_miss)
   io.rsFeedback.bits.flushState := io.dtlbResp.bits.ptwBack
   io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
-  io.rsFeedback.bits.sourceType := Mux(s1_tlb_miss , RSFeedbackType.tlbMiss , RSFeedbackType.pmptable_miss)
+  io.rsFeedback.bits.sourceType := RSFeedbackType.tlbMiss 
   XSDebug(io.rsFeedback.valid,
     "S1 Store: tlbHit: %d robIdx: %d\n",
     io.rsFeedback.bits.hit,
@@ -129,7 +129,7 @@ class StoreUnit_S1(implicit p: Parameters) extends XSModule {
 
   // get paddr from dtlb, check if rollback is needed
   // writeback store inst to lsq
-  io.out.valid := io.in.valid && !s1_tlb_miss && !io.pmptable_miss
+  io.out.valid := io.in.valid && !s1_tlb_miss //&& !io.pmptable_miss
   io.out.bits := io.in.bits
   io.out.bits.paddr := s1_paddr
   io.out.bits.miss := false.B
@@ -155,8 +155,10 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val in = Flipped(Decoupled(new LsPipelineBundle))
     val pmpResp = Flipped(new PMPRespBundle)
+    val pmptable_miss = Input(Bool())
     val static_pm = Input(Valid(Bool()))
     val out = Decoupled(new LsPipelineBundle)
+    val rsFeedback = ValidIO(new RSFeedback)
   })
   val pmp = WireInit(io.pmpResp)
   when (io.static_pm.valid) {
@@ -169,11 +171,18 @@ class StoreUnit_S2(implicit p: Parameters) extends XSModule {
   val s2_exception = ExceptionNO.selectByFu(io.out.bits.uop.cf.exceptionVec, staCfg).asUInt.orR
   val is_mmio = io.in.bits.mmio || pmp.mmio
 
+  io.rsFeedback.valid := io.in.valid
+  io.rsFeedback.bits.hit := !io.pmptable_miss
+  io.rsFeedback.bits.flushState := io.in.bits.ptwBack
+  io.rsFeedback.bits.rsIdx := io.in.bits.rsIdx
+  io.rsFeedback.bits.sourceType := RSFeedbackType.pmptable_miss
+  io.rsFeedback.bits.dataInvalidSqIdx := DontCare
+
   io.in.ready := true.B
   io.out.bits := io.in.bits
   io.out.bits.mmio := is_mmio && !s2_exception
   io.out.bits.uop.cf.exceptionVec(storeAccessFault) := io.in.bits.uop.cf.exceptionVec(storeAccessFault) || pmp.st
-  io.out.valid := io.in.valid && (!is_mmio || s2_exception)
+  io.out.valid := io.in.valid && (!is_mmio || s2_exception) && !io.pmptable_miss
 }
 
 class StoreUnit_S3(implicit p: Parameters) extends XSModule {
@@ -202,6 +211,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
     val stin = Flipped(Decoupled(new ExuInput))
     val redirect = Flipped(ValidIO(new Redirect))
     val feedbackSlow = ValidIO(new RSFeedback)
+    //val feedbackFast = ValidIO(new RSFeedback)
     val tlb = new TlbRequestIO()
     val pmp = Flipped(new PMPRespBundle())
     val pmptable_miss = Input(Bool())
@@ -231,16 +241,30 @@ class StoreUnit(implicit p: Parameters) extends XSModule {
 
   PipelineConnect(store_s0.io.out, store_s1.io.in, true.B, store_s0.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
-  store_s1.io.pmptable_miss := io.pmptable_miss
+  //store_s1.io.pmptable_miss := io.pmptable_miss
   store_s1.io.dtlbResp <> io.tlb.resp
   io.lsq <> store_s1.io.lsq
 
   PipelineConnect(store_s1.io.out, store_s2.io.in, true.B, store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
 
   // feedback tlb miss to RS in store_s2
-  io.feedbackSlow.bits := RegNext(store_s1.io.rsFeedback.bits)
-  io.feedbackSlow.valid := RegNext(store_s1.io.rsFeedback.valid && !store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
+  val tlbmiss_replay = RegNext(store_s1.io.rsFeedback.bits)
+  val tlbmiss_replay_valid = RegNext(store_s1.io.rsFeedback.valid && !store_s1.io.out.bits.uop.robIdx.needFlush(io.redirect))
+  val pmptable_replay = store_s2.io.rsFeedback.bits
+  val pmptable_replay_valid = store_s2.io.rsFeedback.valid && !store_s2.io.out.bits.uop.robIdx.needFlush(io.redirect)
 
+    when(tlbmiss_replay_valid && RegNext(store_s1.io.dtlbResp.bits.miss)){
+      io.feedbackSlow.bits := tlbmiss_replay
+    }.elsewhen(pmptable_replay_valid){
+      io.feedbackSlow.bits := pmptable_replay
+    }.otherwise{
+      io.feedbackSlow.bits := pmptable_replay
+    }
+  //io.feedbackSlow.bits := Mux(tlbmiss_replay_valid && RegNext(store_s1.io.dtlbResp.bits.miss), tlbmiss_replay, pmptable_replay)
+  io.feedbackSlow.valid := tlbmiss_replay_valid ||  pmptable_replay_valid
+
+
+  store_s2.io.pmptable_miss := io.pmptable_miss
   store_s2.io.pmpResp <> io.pmp
   store_s2.io.static_pm := RegNext(io.tlb.resp.bits.static_pm)
   io.lsq_replenish := store_s2.io.out.bits // mmio and exception

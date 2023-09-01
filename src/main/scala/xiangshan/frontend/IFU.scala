@@ -476,12 +476,12 @@ class NewIFU(implicit p: Parameters) extends XSModule
     }
 
     is(m_sendPMP){
-      mmio_state :=  Mux(io.pmp.miss, m_sendPMP , m_pmpResp)
+      mmio_state :=  m_pmpResp
     }
 
     is(m_pmpResp){
       val pmpExcpAF = io.pmp.resp.instr || !io.pmp.resp.mmio
-      mmio_state :=  Mux(pmpExcpAF, m_waitCommit , m_resendReq)
+      mmio_state :=  Mux(io.pmp.miss, m_pmpResp, Mux(pmpExcpAF, m_waitCommit , m_resendReq))
       mmio_resend_af := pmpExcpAF
     }
 

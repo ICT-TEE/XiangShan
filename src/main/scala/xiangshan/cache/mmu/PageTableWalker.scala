@@ -90,8 +90,8 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
 
   val finish = WireInit(false.B)
   val pmptable_miss = io.pmp.miss
-  val sent_to_pmp = RegNext((state === s_addr_check || state === s_pm_waiting) && !pmptable_miss)
-  val AccessFault = RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
+  //val sent_to_pmp = RegNext((state === s_addr_check || state === s_pm_waiting) && !pmptable_miss)
+  val AccessFault = RegNext(io.pmp.resp.ld || io.pmp.resp.mmio)//, sent_to_pmp)
   val pageFault = memPte.isPf(level)
   val is_pte = memPte.isLeaf() || memPte.isPf(level)
   val find_pte = is_pte
@@ -112,9 +112,9 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
     }
 
     is (s_addr_check) {
-      when(pmptable_miss){
+      when((RegNext(io.req.fire()) || pmptable_miss)){
         state:= s_addr_check
-      }otherwise {
+      }.otherwise {
         state := s_mem_req
       }
     }
@@ -136,7 +136,7 @@ class PtwFsm()(implicit p: Parameters) extends XSModule with HasPtwConst with Ha
     }
 
     is(s_pm_waiting){
-      when(find_pte || llptw_valid || !pmptable_miss) {
+      when(find_pte || llptw_valid || !(RegNext(mem.resp.fire()) || pmptable_miss)) {
         state := s_check_pte
       }.otherwise{
         state := s_pm_waiting
@@ -351,12 +351,12 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   when (!pmptable_miss_reg && state(pmpwait_id_reg) === state_addr_check && !flush) {
     // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
     //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
-    val accessFault = io.pmp.resp.ld || io.pmp.resp.mmio
+    val accessFault = RegNext(io.pmp.resp.ld || io.pmp.resp.mmio)
     entries(pmpwait_id_reg).af := accessFault
     state(pmpwait_id_reg) := Mux(accessFault, state_mem_out, state_mem_req)
   }
   when (state(pmpwait_id) === state_pmp_waiting ) {
-    when(!pmptable_miss) {
+    when(!(need_addr_check_empty || need_addr_check_busy || pmptable_miss)) {
       state(pmpwait_id) := state_addr_check
     }.otherwise{
       state(pmpwait_id) := state_pmp_waiting

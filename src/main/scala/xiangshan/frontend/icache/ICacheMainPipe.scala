@@ -300,7 +300,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** s1 control */
   val tlbRespAllValid = WireInit(false.B)
-  val pmpRespAllValid = WireInit(false.B)
 
   val s1_valid = generatePipeControl(lastFire = s0_fire, thisFire = s1_fire, thisFlush = tlb_miss_flush, lastFlush = false.B)
 
@@ -315,8 +314,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_tlb_latch_resp_pf = RegEnable(next = tlb_slot.tlb_resp_pf, enable = s0_fire)
   val s1_tlb_latch_resp_af = RegEnable(next = tlb_slot.tlb_resp_af, enable = s0_fire)
 
-  s1_ready := s2_ready && tlbRespAllValid && pmpRespAllValid  || !s1_valid
-  s1_fire  := s1_valid && tlbRespAllValid && pmpRespAllValid && s2_ready && !tlb_miss_flush
+  s1_ready := s2_ready && tlbRespAllValid || !s1_valid
+  s1_fire  := s1_valid && tlbRespAllValid && s2_ready && !tlb_miss_flush
 
   fromITLB.map(_.ready := true.B)
 
@@ -324,7 +323,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s1_tlb_all_resp_wire       =  RegNext(s0_fire)
   val s1_tlb_all_resp_reg        =  RegInit(false.B)
 
-  when(s1_valid && s1_tlb_all_resp_wire && !tlb_miss_flush && (!s2_ready || io.pmp.map(_.miss).reduce(_||_)))   {s1_tlb_all_resp_reg := true.B}
+  when(s1_valid && s1_tlb_all_resp_wire && !tlb_miss_flush && !s2_ready)   {s1_tlb_all_resp_reg := true.B}
   .elsewhen(s1_fire && s1_tlb_all_resp_reg)             {s1_tlb_all_resp_reg := false.B}
 
   tlbRespAllValid := s1_tlb_all_resp_wire || s1_tlb_all_resp_reg
@@ -375,13 +374,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   //send physical address to PMP
   io.pmp.zipWithIndex.map { case (p, i) =>
     // p.req.valid := s1_valid && !tlb_miss_flush && !missSwitchBit
-    p.req.valid := RegNext(s0_fire) && !tlb_miss_flush && !missSwitchBit
+    p.req.valid := s1_fire
     p.req.bits.addr := s1_req_paddr(i)
     p.req.bits.size := 3.U
     p.req.bits.cmd := TlbCmd.exec
   }
-
-  pmpRespAllValid := io.pmp.map(!_.miss).reduce(_&&_)
 
   /** <PERF> replace victim way number */
 
@@ -412,12 +409,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   /** s2 control */
   val s2_fetch_finish = Wire(Bool())
+  val pmpRespAllValid = WireInit(false.B)
 
   val s2_valid          = generatePipeControl(lastFire = s1_fire, thisFire = s2_fire, thisFlush = false.B, lastFlush = tlb_miss_flush)
   val s2_miss_available = Wire(Bool())
 
-  s2_ready      := (s2_valid && s2_fetch_finish && !io.respStall) || (!s2_valid && s2_miss_available)
-  s2_fire       := s2_valid && s2_fetch_finish && !io.respStall
+  s2_ready      := (s2_valid && s2_fetch_finish && pmpRespAllValid && !io.respStall) || (!s2_valid && s2_miss_available)
+  s2_fire       := s2_valid && s2_fetch_finish && pmpRespAllValid && !io.respStall
 
   /** s2 data */
   val mmio = fromPMP.map(port => port.mmio) // TODO: handle it
@@ -499,7 +497,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   val s2_except_pf        = RegEnable(tlbExcpPF, s1_fire)
   val s2_except_tlb_af    = RegEnable(tlbExcpAF, s1_fire)
   //long delay exception signal
-  val s2_except_pmp_af    =  DataHoldBypass(pmpExcpAF, RegNext(s1_fire))
+  val s2_except_pmp_af    = Seq.fill(2)(WireInit(false.B)) //DataHoldBypass(pmpExcpAF, RegNext(s1_fire))
   // val s2_except_parity_af =  VecInit(s2_parity_error(i) && RegNext(RegNext(s1_fire))                      )
 
   val s2_except    = VecInit((0 until 2).map{i => s2_except_pf(i) || s2_except_tlb_af(i)})
@@ -514,6 +512,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   //   p.req.bits.size := 3.U // TODO
   //   p.req.bits.cmd := TlbCmd.exec
   // }
+  pmpRespAllValid := io.pmp.map(!_.miss).reduce(_&&_)
 
   /*** cacheline miss logic ***/
   val wait_idle :: wait_queue_ready :: wait_send_req  :: wait_two_resp :: wait_0_resp :: wait_1_resp :: wait_one_resp ::wait_finish :: wait_pmp_except :: Nil = Enum(9)
@@ -834,7 +833,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     toIFU(i).bits.paddr     := s2_req_paddr(i)
     toIFU(i).bits.vaddr     := s2_req_vaddr(i)
     toIFU(i).bits.tlbExcp.pageFault     := s2_except_pf(i)
-    toIFU(i).bits.tlbExcp.accessFault   := s2_except_tlb_af(i) || missSlot(i).m_corrupt || s2_except_pmp_af(i)
+    toIFU(i).bits.tlbExcp.accessFault   := s2_except_tlb_af(i) || missSlot(i).m_corrupt || pmpExcpAF(i)
     toIFU(i).bits.tlbExcp.mmio          := s2_mmio
 
     when(RegNext(s2_fire && missSlot(i).m_corrupt)){

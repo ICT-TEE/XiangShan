@@ -435,6 +435,7 @@ trait PMPCheckMethod extends PMPConst {
 
     val passThrough = if (pmpEntries.isEmpty) true.B else (mode > 1.U)
     val pmpDefault = WireInit(0.U.asTypeOf(new PMPEntry()))
+    pmpDefault.addr := 0.U
     pmpDefault.cfg.r := passThrough
     pmpDefault.cfg.w := passThrough
     pmpDefault.cfg.x := passThrough
@@ -451,6 +452,13 @@ trait PMPCheckMethod extends PMPConst {
       cur.cfg.r := aligned && (pmp.cfg.r || ignore)
       cur.cfg.w := aligned && (pmp.cfg.w || ignore)
       cur.cfg.x := aligned && (pmp.cfg.x || ignore)
+
+      val base_addr = Mux(
+        pmp.cfg.tor,
+        last_pmp.addr << 2.U,
+        Cat((pmp.addr & ~(pmp.mask >> 3.U))>> 10.U, 0.U(12.W)))
+
+      cur.addr := addr - base_addr
 
 //      Mux(is_match, cur, prev)
       match_vec(i) := is_match
@@ -534,7 +542,7 @@ class PMPChecker
 (
   lgMaxSize: Int = 3,
   sameCycle: Boolean = false,
-  leaveHitMux: Boolean = false,
+  leaveHitMux: Boolean = true,
   pmpUsed: Boolean = true
 )(implicit p: Parameters) extends PMPModule
   with PMPCheckMethod
@@ -543,7 +551,7 @@ class PMPChecker
   require(!(leaveHitMux && sameCycle))
   val io = IO(new PMPCheckIO(lgMaxSize))
 
-  val req = if (EnablePMPTable) DataHoldBypass(io.req.bits, io.req.valid) else io.req.bits
+  val req = io.req.bits
 
   val (res_pmp, pmp_match_idx) = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
   val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
@@ -566,30 +574,27 @@ class PMPChecker
   if (EnablePMPTable && pmpUsed) {
     require(!(sameCycle && pmpUsed))
 
-    val pmpt_hit = res_pmp.cfg.t && pmp_match_idx < 15.U && io.check_env.mode < 2.U
+    val pmpt_hit = res_pmp.cfg.t && RegEnable(pmp_match_idx < 15.U && io.check_env.mode < 2.U, io.req.valid)
     io.miss := false.B
 
     // hit pmptable
     when (pmpt_hit) {
       io.plb.req.valid := true.B
-      io.plb.req.bits.offset := req.addr - Mux(
-        res_pmp.cfg.tor,
-        Mux(pmp_match_idx === 0.U, 0.U, io.check_env.pmp(pmp_match_idx - 1.U).addr << 2.U),
-        getBaseAddr(res_pmp.addr, res_pmp.mask))
-      io.plb.req.bits.patp := io.check_env.pmp(pmp_match_idx + 1.U).addr
+      io.plb.req.bits.offset := res_pmp.addr  // 34.W offset
+      io.plb.req.bits.patp := RegEnable(io.check_env.pmp(pmp_match_idx + 1.U).addr, io.req.valid)
 
       io.miss := io.plb.miss
     }
 
-    io.resp := Mux(RegNext(pmpt_hit && !io.miss),
-      RegNext(resp_pma) | pmp_check(req.cmd, io.plb.resp),     // plb resp
-      RegEnable(resp, io.req.valid))
+    io.resp := Mux(pmpt_hit,
+      resp_pma | pmp_check(req.cmd, io.plb.resp),     // plb resp
+      resp)
   }
 
-  def getBaseAddr(cfgAddr: UInt, cfgMask: UInt): UInt = {
-    val base = cfgAddr & ~(cfgMask >> 3.U)
-    Cat(base >> 10.U, 0.U(12.W))
-  }
+  // def getBaseAddr(cfgAddr: UInt, cfgMask: UInt): UInt = {
+  //   val base = cfgAddr & ~(cfgMask >> 3.U)
+  //   Cat(base >> 10.U, 0.U(12.W))
+  // }
 }
 
 /* get config with check */
