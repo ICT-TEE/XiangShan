@@ -263,7 +263,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val sourceNode = IntSourceNode(IntSourcePortSimple(num+rot_num, ports = 1, sources = 1))
     
     lazy val module = new LazyModuleImp(this){
-      val (regular, rot) = sourceNode.out.head._1.splitAt(num)
+      val (rot,regular) = sourceNode.out.head._1.splitAt(rot_num)
       val in = IO(Input(Vec(num, Bool())))
       in.zip(regular).foreach{ case (i, s) => s := i }
       // in.zip(sourceNode.out.head._1).foreach{ case (i, s) => s := i }
@@ -293,20 +293,6 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   
   val tlrot = LazyModule(new TLROT_blackbox)
   tlrot.node := TLFragmenter(4, 8) := TLWidthWidget(8) :=  peripheralXbar
-
-  
-  // val plicSource_rot = LazyModule(new IntSourceNodeToModule(tlrot_intr))
-
-  // val plicMergeSource = LazyModule(new IntSourceNodeToModule(plicSource.num + plicSource_rot.num))
-  // plicMergeSource.sourceNode := plicSource.sourceNode
-  // plicMergeSource.sourceNode := plicSource_rot.sourceNode
-  // plic.intnode := plicMergeSource.sourceNode
-  // plic.intnode := plicSource_rot.sourceNode
-  // plicSource_rot.module.in := tlrot.module.io_rot.intr
-
-  // plicMergeSource.module.in.zip(tlrot.module.io_rot.intr).foreach{
-  //   case(i,s) => i := s
-  // }
  
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
