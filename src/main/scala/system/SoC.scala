@@ -20,7 +20,7 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import device.{DebugModule, TLPMA, TLPMAIO}
-import device_test.{TLROT_test, TLROT_blackbox}
+import device_test.{ROT_rstmgr, TLROT_blackbox}
 import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams, PLICParams, TLError, TLPLIC}
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
@@ -288,8 +288,8 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   )
   pll_node := peripheralXbar
   // ROT
-  // val tlrot = LazyModule(new TLROT_test)
-  // tlrot.node := peripheralXbar
+  val rot_rstmgr = LazyModule(new ROT_rstmgr)
+  rot_rstmgr.node := peripheralXbar
   
   val tlrot = LazyModule(new TLROT_blackbox)
   tlrot.node := TLFragmenter(4, 8) := TLWidthWidget(8) :=  peripheralXbar
@@ -315,7 +315,8 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val cacheable_check = IO(new TLPMAIO)
 
     tlrot.module.io_rot.clock := clock
-    tlrot.module.io_rot.reset := reset
+    val rst_ctrl = reset.asUInt | rot_rstmgr.module.io.ctrl
+    tlrot.module.io_rot.reset := rst_ctrl
 
     debugModule.module.io <> debug_module_io
 

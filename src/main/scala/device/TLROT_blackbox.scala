@@ -59,7 +59,8 @@ class TLROT_top extends BlackBox with HasBlackBoxResource {
 
   val io = IO(new Bundle {
     val clk_i = Input(Clock())
-    val rst_ni = Input(AsyncReset())
+    // val rst_ni = Input(AsyncReset())
+    val rst_ni = Input(Bool())
 
     // val tl_i = Input(new TlH2d())
     // val tl_o = Output(new TlD2h())
@@ -128,16 +129,16 @@ class TLROT_blackbox(implicit p: Parameters) extends LazyModule {
   // val mem = SyncReadMem(0x1000, UInt(32.W))
   // val regmap = RegField.map("mem" -> mem)
 
-  val tlrotAddr = ResourceAddress(
-    address = Seq(AddressSet(0x39000000L, 0xffffff)),
-    permissions = ResourcePermissions(
-      r = true,
-      w = true,
-      x = false, 
-      c = false,
-      a = false
-    )
-  )
+  // val tlrotAddr = ResourceAddress(
+  //   address = Seq(AddressSet(0x39000000L, 0xffffff)),
+  //   permissions = ResourcePermissions(
+  //     r = true,
+  //     w = true,
+  //     x = false, 
+  //     c = false,
+  //     a = false
+  //   )
+  // )
   val tlrotDevice = new SimpleDevice("tlrot", Seq("sifive,tlrot0"))
   val tlrotResource = Resource(tlrotDevice, "tlrot")
 
@@ -145,7 +146,7 @@ class TLROT_blackbox(implicit p: Parameters) extends LazyModule {
 
   // Create a TLManagerNode
   val node = TLManagerNode(Seq(TLSlavePortParameters.v1(Seq(TLSlaveParameters.v1(
-    address = Seq(AddressSet(0x3b000000, 0xffffff)), 
+    address = Seq(AddressSet(0x3b000000, 0x2fffff)), 
     // resources = device.reg("mem"),
     resources = Seq(
       // tlrotAddr, 
@@ -161,7 +162,8 @@ class TLROT_blackbox(implicit p: Parameters) extends LazyModule {
   lazy val module = new LazyModuleImp(this) {
     val io_rot = IO(new Bundle { 
       val clock = Input(Clock())
-      val reset = Input(AsyncReset())
+      // val reset = Input(AsyncReset())
+      val reset = Input(Bool())
       val intr = Output(Vec(17,Bool()))
       // val intr = Output(new interruptIO)
 
@@ -251,9 +253,9 @@ class TLROT_blackbox(implicit p: Parameters) extends LazyModule {
     // in.d.ready := tlrot.io.tl_o.ready 
     tlrot.io.clk_i := io_rot.clock
 
-    val rst_wire = Wire(Reset())
-    rst_wire := io_rot.reset
-    tlrot.io.rst_ni := rst_wire
+    // val rst_wire = Wire(Reset())
+    // rst_wire := io_rot.reset
+    // tlrot.io.rst_ni := rst_wire
     tlrot.io.rst_ni := io_rot.reset
   }
 }

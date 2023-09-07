@@ -23,6 +23,8 @@ package tl_main_rot_pkg;
   localparam logic [31:0] ADDR_SPACE_CSRNG_ROT                = 32'h 3b150000;
   localparam logic [31:0] ADDR_SPACE_EDN0_ROT                 = 32'h 3b190000;
   localparam logic [31:0] ADDR_SPACE_KEYMGR_ROT               = 32'h 3b140000;
+  localparam logic [31:0] ADDR_SPACE_RSTMGR_ROT               = 32'h 3b300000;
+
   
   localparam logic [31:0] ADDR_MASK_ROM_CTRL__ROM_ROT        = 32'h 00007fff;
   localparam logic [31:0] ADDR_MASK_ROM_CTRL__REGS_ROT       = 32'h 0000007f;
