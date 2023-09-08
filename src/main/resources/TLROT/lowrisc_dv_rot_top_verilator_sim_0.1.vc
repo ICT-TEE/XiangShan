@@ -330,6 +330,8 @@
  ../src/main/resources/TLROT/src/lowrisc_systems_rot_top_0.1/rtl/rot_top.sv
  ../src/main/resources/TLROT/src/lowrisc_systems_rot_top_0.1/rtl/xbar_main_rot.sv
 //  ../src/main/resources/TLROT/src/lowrisc_dv_rot_top_verilator_sim_0.1/tb_rot_top.sv
+ ../src/main/resources/TLROT/src/rng/ast_pulse_sync.sv
+ ../src/main/resources/TLROT/src/rng/rng.sv
 // --top-module tb_rot_top
 // --exe
 //  ../src/main/resources/TLROT/src/lowrisc_dv_rot_top_verilator_sim_0.1/tb_rot_top.cc

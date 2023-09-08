@@ -50,6 +50,10 @@ logic clk_edn_i;
 logic rst_edn_ni;
 logic rst_shadowed_ni;
 
+// entropy src
+entropy_src_pkg::entropy_src_rng_req_t       es_rng_req_o;
+entropy_src_pkg::entropy_src_rng_rsp_t       es_rng_rsp_i;
+logic       es_rng_fips_o;
 
 
 // always_comb begin
@@ -102,6 +106,10 @@ rot_top u_rot_top (
     .tl_i(tl_i),
     .tl_o(tl_o),
 
+    .es_rng_req_o(es_rng_req_o),
+    .es_rng_rsp_i(es_rng_rsp_i),
+    .es_rng_fips_o(es_rng_fips_o),
+
     .intr_hmac_hmac_done_o(intr_hmac_hmac_done_o),
     .intr_hmac_fifo_empty_o(intr_hmac_fifo_empty_o),  
     .intr_hmac_hmac_err_o(intr_hmac_hmac_err_o),
@@ -119,6 +127,21 @@ rot_top u_rot_top (
     .intr_entropy_src_es_fatal_err_o(intr_entropy_src_es_fatal_err_o),
     .intr_edn0_edn_cmd_req_done_o(intr_edn0_edn_cmd_req_done_o),
     .intr_edn0_edn_fatal_err_o(intr_edn0_edn_fatal_err_o)
+);
+
+localparam int unsigned EntropyStreams = 4;
+rng #(
+  .EntropyStreams ( EntropyStreams )
+) u_rng (
+  .clk_i ( clk_i ),
+  .rst_ni ( ~rst_ni ),
+  .clk_ast_rng_i ( clk_i ),
+  .rst_ast_rng_ni (  ~rst_ni ),
+  .rng_en_i ( es_rng_req_o.rng_enable ),
+  .rng_fips_i ( es_rng_fips_o ),
+  .scan_mode_i ( 1'b0 ),
+  .rng_b_o ( es_rng_rsp_i.rng_b  ),
+  .rng_val_o ( es_rng_rsp_i.rng_valid )
 );
     
 endmodule

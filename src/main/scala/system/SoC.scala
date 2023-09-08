@@ -272,7 +272,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
       rot_in.zip(rot).foreach{ case (i, s) => s := i }
     }
   }
-
+ 
   val tlrot_intr = 17
   val plic = LazyModule(new TLPLIC(PLICParams(0x3c000000L), 8))
   val plicSource = LazyModule(new IntSourceNodeToModule(NrExtIntr, tlrot_intr))
@@ -289,7 +289,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   pll_node := peripheralXbar
   // ROT
   val rot_rstmgr = LazyModule(new ROT_rstmgr)
-  rot_rstmgr.node := peripheralXbar
+  rot_rstmgr.node := peripheralXbar 
   
   val tlrot = LazyModule(new TLROT_blackbox)
   tlrot.node := TLFragmenter(4, 8) := TLWidthWidget(8) :=  peripheralXbar
