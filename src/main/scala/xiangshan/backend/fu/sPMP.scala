@@ -72,9 +72,9 @@ trait SPMPCheckMethod extends SPMPConst {
 
     val passThrough = if (spmpEntries.isEmpty) true.B else (mode > 1.U)
     val spmpDefault = WireInit(0.U.asTypeOf(new PMPEntry()))
-    spmpDefault.cfg.r := true.B
-    spmpDefault.cfg.w := true.B
-    spmpDefault.cfg.x := true.B
+    spmpDefault.cfg.r := mode(1) === 1.U
+    spmpDefault.cfg.w := mode(1) === 1.U
+    spmpDefault.cfg.x := mode(1) === 1.U
 
     val match_vec = Wire(Vec(num+1, Bool()))
     val cfg_vec = Wire(Vec(num+1, new PMPEntry()))
@@ -135,7 +135,7 @@ trait SPMPCheckMethod extends SPMPConst {
       BitPat("b0111_11") -> "b110".U,
       BitPat("b0111_0?") -> "b111".U,
 
-      BitPat("b1000_0?") -> "b000".U, // reserved, U
+      BitPat("b1000_0?") -> "b111".U, // reserved, U
       BitPat("b1000_1?") -> "b111".U, // S
 
       BitPat("b1001_1?") -> "b001".U,
