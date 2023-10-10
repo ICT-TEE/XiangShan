@@ -225,9 +225,9 @@ package top_earlgrey_rnd_cnst_rot_pkg;
   // otbn
   ////////////////////////////////////////////
   // Default seed of the PRNG used for URND.
-  // parameter otbn_pkg::urnd_prng_seed_t RndCnstOtbnUrndPrngSeed = {
-  //   256'h173B0217_51142EB3_0B9482BD_8E7D31D3_E1A2619D_66EF6CB9_16FD6C86_4A510AED
-  // };
+  parameter otbn_pkg::urnd_prng_seed_t RndCnstOtbnUrndPrngSeed = {
+    256'h173B0217_51142EB3_0B9482BD_8E7D31D3_E1A2619D_66EF6CB9_16FD6C86_4A510AED
+  };
 
   // Compile-time random reset value for IMem/DMem scrambling key.
   parameter otp_ctrl_pkg::otbn_key_t RndCnstOtbnOtbnKey = {

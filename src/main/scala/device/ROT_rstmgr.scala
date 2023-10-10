@@ -17,7 +17,7 @@ class ROT_rstmgr(implicit p: Parameters) extends LazyModule {
     device = new SimpleDevice("rot_rstmgr", Seq()),
     beatBytes = 8,
     concurrency = 1
-  )
+  ) 
 
   lazy val module = new LazyModuleImp(this) {
     val io = IO(new Bundle {

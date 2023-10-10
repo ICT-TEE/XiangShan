@@ -26,8 +26,8 @@ module tb_rot_top(
         .tl_i(tl_host_i),
         .tl_o(tl_host_o),
         .keymgr_aes_key(keymgr_aes_key),
-        .keymgr_kmac_key(keymgr_kmac_key),
-        .keymgr_otbn_key(keymgr_otbn_key),
+        // .keymgr_kmac_key(keymgr_kmac_key),
+        // .keymgr_otbn_key(keymgr_otbn_key),
         .es_rng_req_o(es_rng_req_o),
         .es_rng_fips_o(es_rng_fips_o)
     );

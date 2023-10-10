@@ -19,8 +19,13 @@ module rot_top #(
   parameter int EntropySrcEsFifoDepth = 4,
   parameter bit EntropySrcStub = 0,
   // parameters for edn0
+  // parameters for otbn
+  parameter bit OtbnStub = 0,
+  parameter otbn_pkg::regfile_e OtbnRegFile = otbn_pkg::RegFileFF,
+  parameter bit SecOtbnMuteUrnd = 0,
+  parameter bit SecOtbnSkipUrndReseedAtStart = 0,
   // alert
-  parameter logic [12-1:0] AlertAsyncOn = {12{1'b1}}
+  parameter logic [14-1:0] AlertAsyncOn = {14{1'b1}}
 ) (
     input clk_i,
     input rst_ni,
@@ -50,11 +55,12 @@ module rot_top #(
     output logic intr_entropy_src_es_fatal_err_o,
     output logic intr_edn0_edn_cmd_req_done_o,
     output logic intr_edn0_edn_fatal_err_o,
+    output logic intr_otbn_done,
 
     // key output
     output keymgr_pkg::hw_key_req_t       keymgr_aes_key,
-    output keymgr_pkg::hw_key_req_t       keymgr_kmac_key,
-    output keymgr_pkg::otbn_key_req_t       keymgr_otbn_key,
+    // output keymgr_pkg::hw_key_req_t       keymgr_kmac_key,
+    // output keymgr_pkg::otbn_key_req_t       keymgr_otbn_key,
 
     // entropy src
     output entropy_src_pkg::entropy_src_rng_req_t       es_rng_req_o,
@@ -76,7 +82,7 @@ module rot_top #(
     // kmac
     // output kmac_pkg::app_rsp_t kmac_app_rsp_lc,
     // input kmac_pkg::app_req_t kmac_app_req_lc,
-    output prim_mubi_pkg::mubi4_t  clkmgr_aon_idle_rot,
+    // output prim_mubi_pkg::mubi4_t  clkmgr_aon_idle_rot,
 
     //csrng
     // input csrng_pkg::csrng_req_t  rot_top_csrng_csrng_cmd_req,
@@ -96,9 +102,16 @@ module rot_top #(
     // input tlul_pkg::tl_h2d_t       edn0_tl_req,
     // output tlul_pkg::tl_d2h_t       edn0_tl_rsp,
 
-    // alerts NAlerts = 12
-    input  prim_alert_pkg::alert_rx_t [12-1:0] alert_rx_i,
-    output prim_alert_pkg::alert_tx_t [12-1:0] alert_tx_o
+    //otbn
+    // input prim_ram_1p_pkg::ram_1p_cfg_t       ast_ram_1p_cfg,
+    // output otp_ctrl_pkg::otbn_otp_key_req_t       otp_ctrl_otbn_otp_key_req,
+    // input otp_ctrl_pkg::otbn_otp_key_rsp_t       otp_ctrl_otbn_otp_key_rsp,
+    // input lc_ctrl_pkg::lc_tx_t       flash_ctrl_rma_ack,
+    // output lc_ctrl_pkg::lc_tx_t       otbn_lc_rma_ack,
+
+    // alerts NAlerts = 14
+    input  prim_alert_pkg::alert_rx_t [14-1:0] alert_rx_i,
+    output prim_alert_pkg::alert_tx_t [14-1:0] alert_tx_o
 );
 
   import tlul_pkg::*;
@@ -127,6 +140,8 @@ module rot_top #(
   // tlul_pkg::tl_d2h_t       rom_ctrl_rom_tl_rsp;
   tlul_pkg::tl_h2d_t       rom_ctrl_regs_tl_req;
   tlul_pkg::tl_d2h_t       rom_ctrl_regs_tl_rsp;
+  tlul_pkg::tl_h2d_t       otbn_tl_req;
+  tlul_pkg::tl_d2h_t       otbn_tl_rsp;
 
 
   // Alert list
@@ -158,7 +173,7 @@ module rot_top #(
   // logic intr_edn0_edn_fatal_err;
 
   // define inter-module signal
-  prim_mubi_pkg::mubi4_t [1:0] clkmgr_aon_idle;
+  prim_mubi_pkg::mubi4_t [2:0] clkmgr_aon_idle;
   logic unused_clkmgr_aon_idle;
   assign unused_clkmgr_aon_idle = ^ clkmgr_aon_idle;
 
@@ -173,8 +188,8 @@ module rot_top #(
   localparam otp_ctrl_pkg::otp_keymgr_key_t otp_ctrl_otp_keymgr_key = otp_ctrl_pkg::OTP_KEYMGR_KEY_DEFAULT;
   localparam otp_ctrl_pkg::otp_device_id_t keymgr_otp_device_id = 256'h48ecf6c738f0f108a5b08620695ffd4d48ecf6c738f0f108a5b08620695ffd4d;
   // keymgr_pkg::hw_key_req_t       keymgr_aes_key;
-  // keymgr_pkg::hw_key_req_t       keymgr_kmac_key;
-  // keymgr_pkg::otbn_key_req_t       keymgr_otbn_key;
+  keymgr_pkg::hw_key_req_t       keymgr_kmac_key;
+  keymgr_pkg::otbn_key_req_t       keymgr_otbn_key;
   kmac_pkg::app_req_t [2:0] kmac_app_req;
   // assign kmac_app_req[1] = kmac_pkg::APP_REQ_DEFAULT;
   kmac_pkg::app_rsp_t [2:0] kmac_app_rsp;
@@ -226,6 +241,13 @@ module rot_top #(
   localparam prim_mubi_pkg::mubi8_t       entropy_src_otp_en_entropy_src_fw_over = prim_mubi_pkg::mubi8_t'(MuBi8False);
   // logic       es_rng_fips_o;
 
+  // otbn
+  prim_ram_1p_pkg::ram_1p_cfg_t       ast_ram_1p_cfg = prim_ram_1p_pkg::RAM_1P_CFG_DEFAULT;
+  otp_ctrl_pkg::otbn_otp_key_req_t       otp_ctrl_otbn_otp_key_req;
+  otp_ctrl_pkg::otbn_otp_key_rsp_t       otp_ctrl_otbn_otp_key_rsp;
+  localparam lc_ctrl_pkg::lc_tx_t       flash_ctrl_rma_ack = lc_ctrl_pkg::Off;
+  lc_ctrl_pkg::lc_tx_t       otbn_lc_rma_ack;
+
   // sinterrupt assignments
   // assign intr_vector = {
   //   intr_hmac_hmac_done,
@@ -250,6 +272,7 @@ module rot_top #(
   // assign unused_intr_vector = ^ intr_vector;
 
   assign kmac_app_req[2] = kmac_pkg::APP_REQ_DEFAULT;
+  
   // assign kmac_app_rsp_lc = kmac_app_rsp[2]; 
 
   // assign csrng_csrng_cmd_req[1] = rot_top_csrng_csrng_cmd_req;
@@ -259,14 +282,14 @@ module rot_top #(
   assign edn0_edn_req_intr[2] = edn0_edn_req[2];
   assign edn0_edn_req_intr[4] = edn0_edn_req[4];
   assign edn0_edn_req_intr[5] = edn0_edn_req[5];
-  assign edn0_edn_req_intr[6] = edn0_edn_req[6];
+  // assign edn0_edn_req_intr[6] = edn0_edn_req[6];
   assign edn0_edn_req_intr[7] = edn0_edn_req[7];
 
   assign edn0_edn_rsp[1] = edn0_edn_rsp_intr[1];
   assign edn0_edn_rsp[2] = edn0_edn_rsp_intr[2];
   assign edn0_edn_rsp[4] = edn0_edn_rsp_intr[4];
   assign edn0_edn_rsp[5] = edn0_edn_rsp_intr[5];
-  assign edn0_edn_rsp[6] = edn0_edn_rsp_intr[6];
+  // assign edn0_edn_rsp[6] = edn0_edn_rsp_intr[6];
   assign edn0_edn_rsp[7] = edn0_edn_rsp_intr[7];
 
   hmac #(
@@ -320,8 +343,8 @@ module rot_top #(
       .entropy_i(edn0_edn_rsp_intr[3]),
       // .entropy_o(edn0_edn_req_rot),
       // .entropy_i(edn0_edn_rsp_rot),
-      // .idle_o(clkmgr_aon_idle[1]),
-      .idle_o(clkmgr_aon_idle_rot),
+      .idle_o(clkmgr_aon_idle[1]),
+      // .idle_o(clkmgr_aon_idle_rot),
       .en_masking_o(kmac_en_masking),
       .lc_escalate_en_i(lc_ctrl_lc_escalate_en),
       .tl_i(kmac_tl_req),
@@ -513,6 +536,49 @@ module rot_top #(
       .rst_ni
   );
 
+  otbn #(
+    .AlertAsyncOn(2'b11),
+    .Stub(OtbnStub),
+    .RegFile(OtbnRegFile),
+    .RndCnstUrndPrngSeed(RndCnstOtbnUrndPrngSeed),
+    .SecMuteUrnd(SecOtbnMuteUrnd),
+    .SecSkipUrndReseedAtStart(SecOtbnSkipUrndReseedAtStart),
+    .RndCnstOtbnKey(RndCnstOtbnOtbnKey),
+    .RndCnstOtbnNonce(RndCnstOtbnOtbnNonce)
+  ) u_otbn (
+
+      // Interrupt
+      .intr_done_o (intr_otbn_done),
+      // [12]: fatal
+      // [13]: recov
+      .alert_tx_o  ( alert_tx_o[13:12] ),
+      .alert_rx_i  ( alert_rx_i[13:12] ),
+
+      // Inter-module signals
+      .otbn_otp_key_o(otp_ctrl_otbn_otp_key_req),
+      .otbn_otp_key_i(otp_ctrl_otbn_otp_key_rsp),
+      // .edn_rnd_o(edn1_edn_req[0]),
+      // .edn_rnd_i(edn1_edn_rsp[0]),
+      .edn_urnd_o(edn0_edn_req_intr[6]),
+      .edn_urnd_i(edn0_edn_rsp_intr[6]),
+      .idle_o(clkmgr_aon_idle[2]),
+      .ram_cfg_i(ast_ram_1p_cfg),
+      .lc_escalate_en_i(lc_ctrl_lc_escalate_en),
+      .lc_rma_req_i(flash_ctrl_rma_ack),
+      .lc_rma_ack_o(otbn_lc_rma_ack),
+      .keymgr_key_i(keymgr_otbn_key),
+      .tl_i(otbn_tl_req),
+      .tl_o(otbn_tl_rsp),
+
+      // Clock and reset connections
+      .clk_i (clk_i),
+      .clk_edn_i (clk_edn_i),
+      .clk_otp_i (clk_i),
+      .rst_ni (rst_ni),
+      .rst_edn_ni (rst_edn_ni),
+      .rst_otp_ni (rst_ni)
+  );
+
   xbar_main_rot u_xbar_main (
     .clk_i,
     .rst_ni,
@@ -551,7 +617,11 @@ module rot_top #(
 
     // port: tl_edn0
     .tl_edn0_o(edn0_tl_req),
-    .tl_edn0_i(edn0_tl_rsp)
+    .tl_edn0_i(edn0_tl_rsp),
+    
+    // port: tl_otbn
+    .tl_otbn_o(otbn_tl_req),
+    .tl_otbn_i(otbn_tl_rsp)
 
   );
     
