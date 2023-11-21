@@ -22,13 +22,13 @@ module rom_ctrl_fsm
   // CSR inputs for DIGEST and EXP_DIGEST. To make the indexing look nicer, these are ordered so
   // that DIGEST_0 is the bottom 32 bits (they get reversed while we're shuffling around the wires
   // in rom_ctrl).
-  input logic [TopCount*32-1:0]      digest_i,
-  input logic [TopCount*32-1:0]      exp_digest_i,
+  input logic [TopCount*64-1:0]      digest_i,
+  input logic [TopCount*64-1:0]      exp_digest_i,
 
   // CSR outputs for DIGEST and EXP_DIGEST. Ordered with word 0 as LSB.
-  output logic [TopCount*32-1:0]     digest_o,
+  output logic [TopCount*64-1:0]     digest_o,
   output logic                       digest_vld_o,
-  output logic [31:0]                exp_digest_o,
+  output logic [63:0]                exp_digest_o,
   output logic                       exp_digest_vld_o,
   output logic [vbits(TopCount)-1:0] exp_digest_idx_o,
 
@@ -43,7 +43,7 @@ module rom_ctrl_fsm
 
   // To KMAC (digest data)
   input logic                        kmac_done_i,
-  input logic [TopCount*32-1:0]      kmac_digest_i,
+  input logic [TopCount*64-1:0]      kmac_digest_i,
   input logic                        kmac_err_i,
 
   // To ROM mux
@@ -52,7 +52,7 @@ module rom_ctrl_fsm
   output logic                       rom_req_o,
 
   // Raw bits from ROM
-  input logic [31:0]                 rom_data_i,
+  input logic [63:0]                 rom_data_i,
 
   // To alert system
   output logic                       alert_o

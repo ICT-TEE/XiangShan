@@ -56,7 +56,7 @@ module rom_ctrl
   // DataWidth is normally 39, representing 32 bits of actual data plus 7 ECC check bits. If
   // scrambling is disabled ("insecure mode"), we store a raw 32-bit image and generate ECC check
   // bits on the fly.
-  localparam int unsigned DataWidth = SecDisableScrambling ? 32 : 39;
+  localparam int unsigned DataWidth = SecDisableScrambling ? 32 : 64;
 
   mubi4_t                   rom_select_bus;
 
@@ -344,7 +344,7 @@ module rom_ctrl
   logic [255:0] digest_q, exp_digest_q;
   logic [255:0] digest_d;
   logic         digest_de;
-  logic [31:0]  exp_digest_word_d;
+  logic [63:0]  exp_digest_word_d;
   logic         exp_digest_de;
   logic [2:0]   exp_digest_idx;
 
@@ -354,7 +354,7 @@ module rom_ctrl
 
     rom_ctrl_fsm #(
       .RomDepth (RomSizeWords),
-      .TopCount (8)
+      .TopCount (4)
     ) u_checker_fsm (
       .clk_i,
       .rst_ni,
@@ -376,7 +376,7 @@ module rom_ctrl
       .rom_select_bus_o     (rom_select_bus),
       .rom_addr_o           (checker_rom_index),
       .rom_req_o            (checker_rom_req),
-      .rom_data_i           (checker_rom_rdata[31:0]),
+      .rom_data_i           (checker_rom_rdata[63:0]),
       .alert_o              (checker_alert)
     );
 
@@ -412,24 +412,53 @@ module rom_ctrl
 
   end : gen_fsm_scramble_disabled
 
+  // // Register data =============================================================
+
+  // // DIGEST and EXP_DIGEST registers
+
+  // // Repack signals to convert between the view expected by rom_ctrl_reg_pkg for CSRs and the view
+  // // expected by rom_ctrl_fsm. Register 0 of a multi-reg appears as the low bits of the packed data.
+  // for (genvar i = 0; i < 8; i++) begin: gen_csr_digest
+  //   localparam int unsigned TopBitInt = 32 * i + 31;
+  //   localparam bit [7:0] TopBit = TopBitInt[7:0];
+
+  //   assign hw2reg.digest[i].d = digest_d[TopBit -: 32];
+  //   assign hw2reg.digest[i].de = digest_de;
+
+  //   assign hw2reg.exp_digest[i].d = exp_digest_word_d;
+  //   assign hw2reg.exp_digest[i].de = exp_digest_de && (i[2:0] == exp_digest_idx);
+
+  //   assign digest_q[TopBit -: 32] = reg2hw.digest[i].q;
+  //   assign exp_digest_q[TopBit -: 32] = reg2hw.exp_digest[i].q;
+  // end
+
   // Register data =============================================================
 
   // DIGEST and EXP_DIGEST registers
 
   // Repack signals to convert between the view expected by rom_ctrl_reg_pkg for CSRs and the view
   // expected by rom_ctrl_fsm. Register 0 of a multi-reg appears as the low bits of the packed data.
-  for (genvar i = 0; i < 8; i++) begin: gen_csr_digest
-    localparam int unsigned TopBitInt = 32 * i + 31;
+  for (genvar i = 0; i < 4; i++) begin: gen_csr_digest
+    localparam int unsigned TopBitInt = 64 * i + 63;  // Change from 32 to 64
     localparam bit [7:0] TopBit = TopBitInt[7:0];
 
-    assign hw2reg.digest[i].d = digest_d[TopBit -: 32];
-    assign hw2reg.digest[i].de = digest_de;
+    assign hw2reg.digest[2*i].d = digest_d[TopBit -: 32];  // Low 32 bits
+    assign hw2reg.digest[2*i].de = digest_de;
 
-    assign hw2reg.exp_digest[i].d = exp_digest_word_d;
-    assign hw2reg.exp_digest[i].de = exp_digest_de && (i[2:0] == exp_digest_idx);
+    assign hw2reg.digest[2*i+1].d = digest_d[TopBit - 32 -: 32];  // High 32 bits
+    assign hw2reg.digest[2*i+1].de = digest_de;
 
-    assign digest_q[TopBit -: 32] = reg2hw.digest[i].q;
-    assign exp_digest_q[TopBit -: 32] = reg2hw.exp_digest[i].q;
+    assign hw2reg.exp_digest[2*i].d = exp_digest_word_d[63:32];
+    assign hw2reg.exp_digest[2*i].de = exp_digest_de && (i[1:0] == exp_digest_idx);
+
+    assign hw2reg.exp_digest[2*i+1].d = exp_digest_word_d[31:0];
+    assign hw2reg.exp_digest[2*i+1].de = exp_digest_de && (i[1:0] == exp_digest_idx);
+
+    assign digest_q[TopBit -: 32] = reg2hw.digest[2*i].q;
+    assign digest_q[TopBit - 32 -: 32] = reg2hw.digest[2*i+1].q;
+
+    assign exp_digest_q[TopBit -: 32] = reg2hw.exp_digest[2*i].q;
+    assign exp_digest_q[TopBit - 32 -: 32] = reg2hw.exp_digest[2*i+1].q;
   end
 
   logic bus_integrity_error;
