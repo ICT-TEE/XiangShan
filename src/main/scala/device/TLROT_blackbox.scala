@@ -57,6 +57,10 @@ class TLROT_top extends BlackBox with HasBlackBoxResource {
   val TL_DBW = UInt(4.W)
   val TL_SZW = UInt(2.W)
 
+  val TL_DW64 = UInt(64.W)
+  val TL_DBW64 = UInt(8.W)
+  val TL_SZW64 = UInt(3.W)
+
   val io = IO(new Bundle {
     val clk_i = Input(Clock())
     // val rst_ni = Input(AsyncReset())
@@ -92,6 +96,26 @@ class TLROT_top extends BlackBox with HasBlackBoxResource {
     val d_bits_data = Output(TL_DW)
     val d_bits_denied = Output(Bool())
     val d_ready = Input(Bool())
+
+    val a_valid_rom = Input(Bool())
+    val a_bits_opcode_rom = Input(UInt(3.W))
+    val a_bits_param_rom = Input(UInt(3.W))
+    val a_bits_size_rom = Input(TL_SZW64)
+    val a_bits_source_rom = Input(TL_AIW)
+    val a_bits_address_rom = Input(TL_AW)
+    val a_bits_mask_rom = Input(TL_DBW64) 
+    val a_bits_data_rom = Input(TL_DW64)
+    val a_ready_rom = Output(Bool())
+
+    val d_valid_rom = Output(Bool())
+    val d_bits_opcode_rom = Output(UInt(3.W))
+    val d_bits_param_rom = Output(UInt(3.W))
+    val d_bits_size_rom = Output(TL_SZW64)
+    val d_bits_source_rom = Output(TL_AIW)
+    val d_bits_sink_rom = Output(TL_DIW)
+    val d_bits_data_rom = Output(TL_DW64)
+    val d_bits_denied_rom = Output(Bool())
+    val d_ready_rom = Input(Bool())
 
     val intr_hmac_hmac_done_o = Output(Bool())
     val intr_hmac_fifo_empty_o = Output(Bool())  
@@ -142,6 +166,9 @@ class TLROT_blackbox(implicit p: Parameters) extends LazyModule {
   val tlrotDevice = new SimpleDevice("tlrot", Seq("sifive,tlrot0"))
   val tlrotResource = Resource(tlrotDevice, "tlrot")
 
+  val tlrotDevice_rom = new SimpleDevice("tlrot_rom", Seq("sifive,tlrot_rom"))
+  val tlrotResource_rom = Resource(tlrotDevice_rom, "tlrot_rom")
+
   // val tlrot = Module(new TLROT_top)
 
   // Create a TLManagerNode
@@ -159,6 +186,22 @@ class TLROT_blackbox(implicit p: Parameters) extends LazyModule {
     fifoId             = Some(0))),
      beatBytes)))
 
+   // Create a TLManagerNode
+  val beatBytes_rom = 8
+  val node_rom = TLManagerNode(Seq(TLSlavePortParameters.v1(Seq(TLSlaveParameters.v1(
+    address = Seq(AddressSet(0x3a000000, 0x07ffff)), 
+    // resources = device.reg("mem"),
+    resources = Seq(
+      // tlrotAddr, 
+      tlrotResource_rom
+    ),
+    regionType         = RegionType.IDEMPOTENT,
+    supportsGet        = TransferSizes(beatBytes_rom, beatBytes_rom),
+    // supportsPutFull    = TransferSizes(1, beatBytes_rom),
+    // supportsPutPartial = TransferSizes(1, beatBytes_rom),
+    fifoId             = Some(0))),
+     beatBytes_rom))) 
+ 
   lazy val module = new LazyModuleImp(this) {
     val io_rot = IO(new Bundle { 
       val clock = Input(Clock())
@@ -167,7 +210,7 @@ class TLROT_blackbox(implicit p: Parameters) extends LazyModule {
       val intr = Output(Vec(17,Bool()))
       // val intr = Output(new interruptIO)
 
-      // val intr_hmac_hmac_done_o = Output(Bool())
+      // val intr_hmac_hmac_done_o = Output(Bool()) 
       // val intr_hmac_fifo_empty_o = Output(Bool())  
       // val intr_hmac_hmac_err_o = Output(Bool())
 
@@ -192,6 +235,10 @@ class TLROT_blackbox(implicit p: Parameters) extends LazyModule {
   })
     val (in, edge) = node.in(0)
     dontTouch(in)
+
+    val (in_rom, edge_rom) = node_rom.in(0)
+    dontTouch(in_rom)
+
     dontTouch(io_rot.reset)
 
     // val rot = withClock(clock) {
@@ -209,7 +256,7 @@ class TLROT_blackbox(implicit p: Parameters) extends LazyModule {
     tlrot.io.a_bits_address := in.a.bits.address
     tlrot.io.a_bits_mask := in.a.bits.mask
     tlrot.io.a_bits_data := in.a.bits.data
-    
+
     // dontTouch(in.d.ready)
     // in.d.ready :=  tlrot.io.d_ready
     // tlrot.io.d_valid :=  in.d.valid
@@ -223,7 +270,32 @@ class TLROT_blackbox(implicit p: Parameters) extends LazyModule {
     in.d.bits.data := tlrot.io.d_bits_data
     in.d.bits.denied := tlrot.io.d_bits_denied
 
-   
+    
+    in_rom.a.ready := tlrot.io.a_ready_rom
+    // tlrot.io.a_ready := in.a.ready
+    tlrot.io.a_valid_rom := in_rom.a.valid
+    tlrot.io.a_bits_opcode_rom := in_rom.a.bits.opcode
+    tlrot.io.a_bits_param_rom := in_rom.a.bits.param
+    tlrot.io.a_bits_size_rom := in_rom.a.bits.size
+    tlrot.io.a_bits_source_rom := in_rom.a.bits.source
+    tlrot.io.a_bits_address_rom := in_rom.a.bits.address
+    tlrot.io.a_bits_mask_rom := in_rom.a.bits.mask
+    tlrot.io.a_bits_data_rom := in_rom.a.bits.data
+    
+    // dontTouch(in.d.ready)
+    // in.d.ready :=  tlrot.io.d_ready
+    // tlrot.io.d_valid :=  in.d.valid
+    in_rom.d.valid := tlrot.io.d_valid_rom
+    tlrot.io.d_ready_rom := in_rom.d.ready
+    in_rom.d.bits.opcode := tlrot.io.d_bits_opcode_rom
+    in_rom.d.bits.param := tlrot.io.d_bits_param_rom
+    in_rom.d.bits.size := tlrot.io.d_bits_size_rom
+    in_rom.d.bits.source := tlrot.io.d_bits_source_rom
+    in_rom.d.bits.sink := tlrot.io.d_bits_sink_rom
+    in_rom.d.bits.data := tlrot.io.d_bits_data_rom
+    in_rom.d.bits.denied := tlrot.io.d_bits_denied_rom
+    
+
     io_rot.intr(0) := tlrot.io.intr_hmac_hmac_done_o
     io_rot.intr(1) := tlrot.io.intr_hmac_fifo_empty_o
     io_rot.intr(2) := tlrot.io.intr_hmac_hmac_err_o

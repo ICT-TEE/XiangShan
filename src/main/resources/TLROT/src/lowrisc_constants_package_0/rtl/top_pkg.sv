@@ -14,4 +14,8 @@ localparam int TL_DUW=14;   // d_user
 localparam int TL_DBW=(TL_DW>>3);
 localparam int TL_SZW=$clog2($clog2(TL_DBW)+1);
 
+localparam int TL_DW64=64;    // = TL_DBW * 8; TL_DBW must be a power-of-two
+localparam int TL_DBW64=(TL_DW64>>3);
+localparam int TL_SZW64=$clog2($clog2(TL_DBW64)+1); //2
+
 endpackage

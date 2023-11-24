@@ -293,6 +293,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
   
   val tlrot = LazyModule(new TLROT_blackbox)
   tlrot.node := TLFragmenter(4, 8) := TLWidthWidget(8) :=  peripheralXbar
+  tlrot.node_rom := peripheralXbar
  
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))

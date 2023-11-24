@@ -24,8 +24,8 @@ module rom_ctrl
   // ROM configuration parameters
   input  rom_cfg_t rom_cfg_i,
 
-  input  tlul_pkg::tl_h2d_t rom_tl_i,
-  output tlul_pkg::tl_d2h_t rom_tl_o,
+  input  tlul_pkg::tl_h2d_t64 rom_tl_i,
+  output tlul_pkg::tl_d2h_t64 rom_tl_o,
 
   input  tlul_pkg::tl_h2d_t regs_tl_i,
   output tlul_pkg::tl_d2h_t regs_tl_o,
@@ -150,8 +150,8 @@ module rom_ctrl
 
   // TL interface ==============================================================
 
-  tlul_pkg::tl_h2d_t tl_rom_h2d_upstream, tl_rom_h2d_downstream;
-  tlul_pkg::tl_d2h_t tl_rom_d2h;
+  tlul_pkg::tl_h2d_t64 tl_rom_h2d_upstream, tl_rom_h2d_downstream;
+  tlul_pkg::tl_d2h_t64 tl_rom_d2h;
 
   logic  rom_reg_integrity_error;
 
@@ -177,7 +177,7 @@ module rom_ctrl
   //
   // SEC_CM: CTRL.REDUN
   prim_buf #(
-    .Width($bits(tlul_pkg::tl_h2d_t))
+    .Width($bits(tlul_pkg::tl_h2d_t64))
   ) u_tl_rom_h2d_buf (
     .in_i (tl_rom_h2d_upstream),
     .out_o (tl_rom_h2d_downstream)
@@ -187,16 +187,16 @@ module rom_ctrl
 
   logic rom_integrity_error;
 
-  tlul_adapter_sram #(
+  tlul_adapter_sram64 #(
     .SramAw(RomIndexWidth),
-    .SramDw(32),
+    .SramDw(64),
     .Outstanding(2),
     .ByteAccess(0),
     .ErrOnWrite(1),
-    .CmdIntgCheck(1),
-    .EnableRspIntgGen(1),
+    .CmdIntgCheck(0),
+    .EnableRspIntgGen(0),
     .EnableDataIntgGen(SecDisableScrambling),
-    .EnableDataIntgPt(!SecDisableScrambling), // SEC_CM: BUS.INTEGRITY
+    .EnableDataIntgPt(SecDisableScrambling), // SEC_CM: BUS.INTEGRITY
     .SecFifoPtr      (1)                      // SEC_CM: TLUL_FIFO.CTR.REDUN
   ) u_tl_adapter_rom (
     .clk_i,
@@ -219,8 +219,9 @@ module rom_ctrl
   );
 
   // Snoop on the "upstream" TL transaction to infer the address to pass to the PRINCE cipher.
+  // zdr: addr 2-> 3 for 64bit
   assign bus_rom_prince_index = (tl_rom_h2d_upstream.a_valid ?
-                                 tl_rom_h2d_upstream.a_address[2 +: RomIndexWidth] :
+                                 tl_rom_h2d_upstream.a_address[3 +: RomIndexWidth] :
                                  '0);
 
   // Unless there has been an injected fault, bus_rom_prince_index and bus_rom_rom_index should have

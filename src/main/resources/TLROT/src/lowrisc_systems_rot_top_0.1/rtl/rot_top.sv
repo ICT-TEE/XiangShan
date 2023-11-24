@@ -76,8 +76,8 @@ module rot_top #(
     // output kmac_pkg::app_req_t kmac_app_req_rom,
     output rom_ctrl_pkg::pwrmgr_data_t       rom_ctrl_pwrmgr_data,
     // input prim_rom_pkg::rom_cfg_t       ast_rom_cfg,
-    input tlul_pkg::tl_h2d_t rom_ctrl_rom_tl_req,
-    output tlul_pkg::tl_d2h_t rom_ctrl_rom_tl_rsp,
+    input tlul_pkg::tl_h2d_t64 rom_ctrl_rom_tl_req,
+    output tlul_pkg::tl_d2h_t64 rom_ctrl_rom_tl_rsp,
 
     // kmac
     // output kmac_pkg::app_rsp_t kmac_app_rsp_lc,

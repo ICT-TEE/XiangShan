@@ -9,12 +9,12 @@
 module rom_ctrl_rom_reg_top (
   input clk_i,
   input rst_ni,
-  input  tlul_pkg::tl_h2d_t tl_i,
-  output tlul_pkg::tl_d2h_t tl_o,
+  input  tlul_pkg::tl_h2d_t64 tl_i,
+  output tlul_pkg::tl_d2h_t64 tl_o,
 
   // Output port for window
-  output tlul_pkg::tl_h2d_t tl_win_o,
-  input  tlul_pkg::tl_d2h_t tl_win_i,
+  output tlul_pkg::tl_h2d_t64 tl_win_o,
+  input  tlul_pkg::tl_d2h_t64 tl_win_i,
 
   // To HW
 
@@ -47,14 +47,17 @@ module rom_ctrl_rom_reg_top (
   assign intg_err_o = 1'b0;
 
   // outgoing integrity generation
-  tlul_pkg::tl_d2h_t tl_o_pre;
-  tlul_rsp_intg_gen #(
-    .EnableRspIntgGen(1),
-    .EnableDataIntgGen(0)
-  ) u_rsp_intg_gen (
-    .tl_i(tl_o_pre),
-    .tl_o(tl_o)
-  );
+  tlul_pkg::tl_d2h_t64 tl_o_pre;
+
+  //zdr: del tlul_rsp_intg_gen
+  // tlul_rsp_intg_gen #(
+  //   .EnableRspIntgGen(0),
+  //   .EnableDataIntgGen(0)
+  // ) u_rsp_intg_gen (
+  //   .tl_i(tl_o_pre),
+  //   .tl_o(tl_o)
+  // );
+  assign tl_o = tl_o_pre;
 
   assign tl_win_o = tl_i;
   assign tl_o_pre = tl_win_i;

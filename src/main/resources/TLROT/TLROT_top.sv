@@ -6,6 +6,7 @@ import tlul_pkg::*;
 module TLROT_top (
     input clk_i,
     input rst_ni,
+    
     output         a_ready,
     input          a_valid,
     input  [2:0]   a_bits_opcode,
@@ -24,6 +25,25 @@ module TLROT_top (
     output         d_bits_sink,
     output [31:0]  d_bits_data,
     output         d_bits_denied,
+
+    output         a_ready_rom,
+    input          a_valid_rom,
+    input  [2:0]   a_bits_opcode_rom,
+    input  [2:0]   a_bits_param_rom,
+    input  [2:0]   a_bits_size_rom,
+    input  [7:0]   a_bits_source_rom,
+    input  [31:0]  a_bits_address_rom,
+    input  [7:0]   a_bits_mask_rom,
+    input  [63:0]  a_bits_data_rom,
+    input         d_ready_rom,
+    output          d_valid_rom,
+    output [2:0]   d_bits_opcode_rom,
+    output [2:0]   d_bits_param_rom,
+    output [1:0]   d_bits_size_rom,
+    output [7:0]   d_bits_source_rom,
+    output         d_bits_sink_rom,
+    output [63:0]  d_bits_data_rom,
+    output         d_bits_denied_rom,
 
     output logic intr_hmac_hmac_done_o,
     output logic intr_hmac_fifo_empty_o,
@@ -46,6 +66,10 @@ module TLROT_top (
 
 tlul_pkg::tl_h2d_t tl_i;
 tlul_pkg::tl_d2h_t tl_o;
+
+tlul_pkg::tl_h2d_t64 rom_ctrl_rom_tl_req;
+tlul_pkg::tl_d2h_t64 rom_ctrl_rom_tl_rsp;
+
 logic clk_edn_i;
 logic rst_edn_ni;
 logic rst_shadowed_ni;
@@ -95,6 +119,31 @@ assign d_bits_denied = tl_o.d_error;
 
 assign tl_i.d_ready = d_ready;
 
+assign rom_ctrl_rom_tl_req.a_valid = a_valid_rom;
+assign rom_ctrl_rom_tl_req.a_opcode = a_bits_opcode_rom;  
+assign rom_ctrl_rom_tl_req.a_param = a_bits_param_rom;
+assign rom_ctrl_rom_tl_req.a_size = a_bits_size_rom;
+assign rom_ctrl_rom_tl_req.a_source = a_bits_source_rom;
+assign rom_ctrl_rom_tl_req.a_address = a_bits_address_rom;
+assign rom_ctrl_rom_tl_req.a_mask = a_bits_mask_rom;
+assign rom_ctrl_rom_tl_req.a_data = a_bits_data_rom;
+
+assign rom_ctrl_rom_tl_req.a_user = tlul_pkg::TL_A_USER_DEFAULT;
+// assign tl_o.d_user = tlul_pkg:TL_D_USER_DEFAULT;
+
+assign a_ready_rom = rom_ctrl_rom_tl_rsp.a_ready;
+
+assign d_valid_rom = rom_ctrl_rom_tl_rsp.d_valid;
+assign d_bits_opcode_rom = rom_ctrl_rom_tl_rsp.d_opcode;
+assign d_bits_param_rom = rom_ctrl_rom_tl_rsp.d_param;
+assign d_bits_size_rom = rom_ctrl_rom_tl_rsp.d_size;  
+assign d_bits_source_rom = rom_ctrl_rom_tl_rsp.d_source;
+assign d_bits_sink_rom  = rom_ctrl_rom_tl_rsp.d_sink;
+assign d_bits_data_rom = rom_ctrl_rom_tl_rsp.d_data;
+assign d_bits_denied_rom = rom_ctrl_rom_tl_rsp.d_error;
+
+assign rom_ctrl_rom_tl_req.d_ready = d_ready_rom;
+
 //rst_ni reverse reset!
 rot_top u_rot_top (
     .clk_i(clk_i),
@@ -105,6 +154,9 @@ rot_top u_rot_top (
 
     .tl_i(tl_i),
     .tl_o(tl_o),
+
+    .rom_ctrl_rom_tl_req(rom_ctrl_rom_tl_req),
+    .rom_ctrl_rom_tl_rsp(rom_ctrl_rom_tl_rsp),
 
     .es_rng_req_o(es_rng_req_o),
     .es_rng_rsp_i(es_rng_rsp_i),

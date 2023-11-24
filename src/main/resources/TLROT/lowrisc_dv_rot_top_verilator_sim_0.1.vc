@@ -233,6 +233,7 @@
 ../src/main/resources/TLROT/src/lowrisc_tlul_common_0.1/rtl/tlul_fifo_async.sv
 ../src/main/resources/TLROT/src/lowrisc_tlul_common_0.1/rtl/tlul_assert.sv
 ../src/main/resources/TLROT/src/lowrisc_tlul_common_0.1/rtl/tlul_err.sv
+../src/main/resources/TLROT/src/lowrisc_tlul_common_0.1/rtl/tlul_err64.sv
 ../src/main/resources/TLROT/src/lowrisc_tlul_common_0.1/rtl/tlul_assert_multiple.sv
 ../src/main/resources/TLROT/src/lowrisc_constants_flash_ctrl_0/rtl/flash_ctrl_pkg.sv
 ../src/main/resources/TLROT/src/lowrisc_ip_keymgr_pkg_0.1/rtl/keymgr_reg_pkg.sv
@@ -240,7 +241,9 @@
 ../src/main/resources/TLROT/src/lowrisc_prim_edn_req_0.1/rtl/prim_edn_req.sv
 ../src/main/resources/TLROT/src/lowrisc_tlul_adapter_reg_0.1/rtl/tlul_adapter_reg.sv
 ../src/main/resources/TLROT/src/lowrisc_tlul_adapter_sram_0.1/rtl/tlul_sram_byte.sv
+../src/main/resources/TLROT/src/lowrisc_tlul_adapter_sram_0.1/rtl/tlul_sram_byte64.sv
 ../src/main/resources/TLROT/src/lowrisc_tlul_adapter_sram_0.1/rtl/tlul_adapter_sram.sv
+../src/main/resources/TLROT/src/lowrisc_tlul_adapter_sram_0.1/rtl/tlul_adapter_sram64.sv
 ../src/main/resources/TLROT/src/lowrisc_tlul_lc_gate_0.1/rtl/tlul_lc_gate.sv
 ../src/main/resources/TLROT/src/lowrisc_tlul_socket_1n_0.1/rtl/tlul_err_resp.sv
 ../src/main/resources/TLROT/src/lowrisc_tlul_socket_1n_0.1/rtl/tlul_socket_1n.sv
