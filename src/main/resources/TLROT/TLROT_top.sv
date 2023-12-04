@@ -6,6 +6,7 @@ import tlul_pkg::*;
 module TLROT_top (
     input clk_i,
     input rst_ni,
+    output logic ROMInitEn,
     
     output         a_ready,
     input          a_valid,
@@ -69,6 +70,8 @@ tlul_pkg::tl_d2h_t tl_o;
 
 tlul_pkg::tl_h2d_t64 rom_ctrl_rom_tl_req;
 tlul_pkg::tl_d2h_t64 rom_ctrl_rom_tl_rsp;
+
+rom_ctrl_pkg::pwrmgr_data_t       rom_ctrl_pwrmgr_data;
 
 logic clk_edn_i;
 logic rst_edn_ni;
@@ -144,6 +147,8 @@ assign d_bits_denied_rom = rom_ctrl_rom_tl_rsp.d_error;
 
 assign rom_ctrl_rom_tl_req.d_ready = d_ready_rom;
 
+assign ROMInitEn = (rom_ctrl_pwrmgr_data==8'h66)? 1'd1 : 1'd0;
+
 //rst_ni reverse reset!
 rot_top u_rot_top (
     .clk_i(clk_i),
@@ -155,6 +160,7 @@ rot_top u_rot_top (
     .tl_i(tl_i),
     .tl_o(tl_o),
 
+    .rom_ctrl_pwrmgr_data(rom_ctrl_pwrmgr_data),
     .rom_ctrl_rom_tl_req(rom_ctrl_rom_tl_req),
     .rom_ctrl_rom_tl_rsp(rom_ctrl_rom_tl_rsp),
 

@@ -89,6 +89,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
     misc.plic.intnode := IntBuffer() := core_with_l2(i).beu_int_source
     misc.peripheral_ports(i) := core_with_l2(i).uncache
     misc.core_to_l3_ports(i) :=* core_with_l2(i).memory_port
+    // core_with_l2(i).module.io.ROMInitEn := misc.tlrot.module.io_rot.ROMInitEn
   }
 
   l3cacheOpt.map(_.ctlnode.map(_ := misc.peripheralXbar))
@@ -174,6 +175,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc() with HasSoCParameter
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
+      core.module.io.ROMInitEn := misc.module.ROMInitEn
       io.riscv_halt(i) := core.module.io.cpu_halt
     }
 

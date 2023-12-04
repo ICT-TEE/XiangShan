@@ -314,10 +314,12 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
+    val ROMInitEn = IO(Output(Bool()))
 
     tlrot.module.io_rot.clock := clock
     val rst_ctrl = reset.asUInt | rot_rstmgr.module.io.ctrl
     tlrot.module.io_rot.reset := rst_ctrl
+    ROMInitEn := tlrot.module.io_rot.ROMInitEn
 
     debugModule.module.io <> debug_module_io
 

@@ -57,6 +57,7 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
         val bpWrong = Output(UInt(XLEN.W))
       }
     }
+    val ROMInitEn = Input(Bool())
   })
 
   //decouped-frontend modules
@@ -76,6 +77,8 @@ class FrontendImp (outer: Frontend) extends LazyModuleImp(outer)
 
   // bpu ctrl
   bpu.io.ctrl := csrCtrl.bp_ctrl
+  //zdr ROM init enable
+  bpu.io.ROMInitEn := io.ROMInitEn
 
 // pmp
   val pmp = Module(new PMP())
