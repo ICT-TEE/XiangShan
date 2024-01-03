@@ -20,6 +20,7 @@ import chipsalliance.rocketchip.config.{Field, Parameters}
 import chisel3._
 import chisel3.util._
 import device.{DebugModule, TLPMA, TLPMAIO}
+import device_test.{TLROT_test, TLROT_blackbox}
 import freechips.rocketchip.devices.tilelink.{CLINT, CLINTParams, DevNullParams, PLICParams, TLError, TLPLIC}
 import freechips.rocketchip.diplomacy.{AddressSet, IdRange, InModuleBody, LazyModule, LazyModuleImp, MemoryDevice, RegionType, SimpleDevice, TransferSizes}
 import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
@@ -279,6 +280,12 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     concurrency = 1
   )
   pll_node := peripheralXbar
+  // ROT
+  // val tlrot = LazyModule(new TLROT_test)
+  // tlrot.node := peripheralXbar
+  
+  val tlrot_b = LazyModule(new TLROT_blackbox)
+  tlrot_b.node := peripheralXbar
 
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   debugModule.debug.node := peripheralXbar
@@ -298,6 +305,9 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val pll0_lock = IO(Input(Bool()))
     val pll0_ctrl = IO(Output(Vec(6, UInt(32.W))))
     val cacheable_check = IO(new TLPMAIO)
+
+    tlrot_b.module.io_rot.clock := clock
+    tlrot_b.module.io_rot.reset := reset
 
     debugModule.module.io <> debug_module_io
 
