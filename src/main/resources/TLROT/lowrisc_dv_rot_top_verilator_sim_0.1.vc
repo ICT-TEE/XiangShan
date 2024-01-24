@@ -18,6 +18,8 @@
 // -CFLAGS -I../src/main/resources/TLROT/src/lowrisc_prim_assert_0.1/rtl
 +incdir+../src/main/resources/TLROT/src/lowrisc_dv_verilator_memutil_dpi_scrambled_0/cpp
 // -CFLAGS -I../src/main/resources/TLROT/src/lowrisc_dv_verilator_memutil_dpi_scrambled_0/cpp
++incdir+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl
+// -CFLAGS -I../src/lowrisc_ip_sm3_1.0/rtl
 ../src/main/resources/TLROT/src/lowrisc_lint_common_0.1/tools/verilator/common.vlt
 ../src/main/resources/TLROT/src/lowrisc_lint_comportable_0.1/tools/verilator/comportable.vlt
 ../src/main/resources/TLROT/src/lowrisc_prim_assert_0.1/lint/prim_assert.vlt
@@ -384,6 +386,33 @@
 ../src/main/resources/TLROT/src/lowrisc_systems_rot_top_0.1/rtl/xbar_main_rot.sv
 ../src/main/resources/TLROT/src/rng/ast_pulse_sync.sv
 ../src/main/resources/TLROT/src/rng/rng.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/adder_32b.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/csa_adder_3i_32b.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/sm3_adder.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/sm3_cmprss_ceil_comb.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/sm3_cmprss_core.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/sm3_cmprss_core_wrapper.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/sm3_core_top.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/sm3_expnd_core.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/sm3_expnd_core_wrapper.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/sm3_pad_core.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/sm3_pad_core_wrapper.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/sm3_reg_pkg.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/sm3_reg_top.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm3_1.0/rtl/sm3.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm4_1.0/rtl/get_cki.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm4_1.0/rtl/key_expansion.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm4_1.0/rtl/one_round_for_encdec.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm4_1.0/rtl/one_round_for_key_exp.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm4_1.0/rtl/ready_valid.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm4_1.0/rtl/sbox_replace.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm4_1.0/rtl/sm4_encdec.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm4_1.0/rtl/sm4_reg_pkg.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm4_1.0/rtl/sm4_reg_top.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm4_1.0/rtl/sm4.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm4_1.0/rtl/sm4_top.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm4_1.0/rtl/transform_for_encdec.sv
+../src/main/resources/TLROT/src/lowrisc_ip_sm4_1.0/rtl/transform_for_key_exp.sv
 //  ../src/main/resources/TLROT/src/lowrisc_dv_rot_top_verilator_sim_0.1/tb_rot_top.sv
 // --top-module tb_rot_top
 // --exe

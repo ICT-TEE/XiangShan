@@ -25,6 +25,8 @@ package tl_main_rot_pkg;
   localparam logic [31:0] ADDR_SPACE_KEYMGR_ROT               = 32'h 3b140000;
   localparam logic [31:0] ADDR_SPACE_OTBN_ROT                 = 32'h 3b130000;
   localparam logic [31:0] ADDR_SPACE_RSTMGR_ROT               = 32'h 3b300000;
+  localparam logic [31:0] ADDR_SPACE_SM3                      = 32'h 3b1a0000;
+  localparam logic [31:0] ADDR_SPACE_SM4                      = 32'h 3b1b0000;
   
   // localparam logic [31:0] ADDR_SPACE_ROM_CTRL__ROM_ROT        = 32'h 44008000;
   // localparam logic [31:0] ADDR_SPACE_ROM_CTRL__REGS_ROT       = 32'h 411e0000;
@@ -44,9 +46,11 @@ package tl_main_rot_pkg;
   localparam logic [31:0] ADDR_MASK_EDN0_ROT                 = 32'h 0000007f;
   localparam logic [31:0] ADDR_MASK_KEYMGR_ROT               = 32'h 000000ff;
   localparam logic [31:0] ADDR_MASK_OTBN_ROT                 = 32'h 0000ffff;
+  localparam logic [31:0] ADDR_MASK_SM3                      = 32'h 0000003f;
+  localparam logic [31:0] ADDR_MASK_SM4                      = 32'h 0000003f;
 
   localparam int N_HOST   = 1;
-  localparam int N_DEVICE = 9;
+  localparam int N_DEVICE = 11;
 
   typedef enum int {
     TlRomCtrlRom = 0,
@@ -57,7 +61,9 @@ package tl_main_rot_pkg;
     TlCsrng = 5,
     TlEdn0 = 6,
     TlKeymgr = 7,
-    TlOtbn = 8
+    TlOtbn = 8,
+    TlSm3 = 9,
+    TlSm4 = 10
   } tl_device_e;
 
   typedef enum int {

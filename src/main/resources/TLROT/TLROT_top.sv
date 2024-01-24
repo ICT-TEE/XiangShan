@@ -98,7 +98,7 @@ logic       es_rng_fips_o;
 // end
 
 assign tl_i.a_valid = a_valid;
-assign tl_i.a_opcode = a_bits_opcode;  
+assign tl_i.a_opcode = tl_a_op_e'(a_bits_opcode);  
 assign tl_i.a_param = a_bits_param;
 assign tl_i.a_size = a_bits_size;
 assign tl_i.a_source = a_bits_source;
@@ -123,7 +123,7 @@ assign d_bits_denied = tl_o.d_error;
 assign tl_i.d_ready = d_ready;
 
 assign rom_ctrl_rom_tl_req.a_valid = a_valid_rom;
-assign rom_ctrl_rom_tl_req.a_opcode = a_bits_opcode_rom;  
+assign rom_ctrl_rom_tl_req.a_opcode = tl_a_op_e'(a_bits_opcode_rom);  
 assign rom_ctrl_rom_tl_req.a_param = a_bits_param_rom;
 assign rom_ctrl_rom_tl_req.a_size = a_bits_size_rom;
 assign rom_ctrl_rom_tl_req.a_source = a_bits_source_rom;

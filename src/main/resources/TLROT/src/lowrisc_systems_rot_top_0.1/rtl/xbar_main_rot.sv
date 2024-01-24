@@ -26,6 +26,10 @@
 //       -> edn0
 //     -> sm1_52
 //       -> otbn
+//     -> sm1_60
+//       -> sm3
+//     -> sm1_61
+//       -> sm4
 
 module xbar_main_rot (
   input clk_i,
@@ -55,7 +59,11 @@ module xbar_main_rot (
   output tlul_pkg::tl_h2d_t tl_edn0_o,
   input  tlul_pkg::tl_d2h_t tl_edn0_i,
   output tlul_pkg::tl_h2d_t tl_otbn_o,
-  input  tlul_pkg::tl_d2h_t tl_otbn_i
+  input  tlul_pkg::tl_d2h_t tl_otbn_i,
+  output tlul_pkg::tl_h2d_t tl_sm3_o,
+  input  tlul_pkg::tl_d2h_t tl_sm3_i,
+  output tlul_pkg::tl_h2d_t tl_sm4_o,
+  input  tlul_pkg::tl_d2h_t tl_sm4_i
 );
 
   import tlul_pkg::*;
@@ -82,8 +90,8 @@ module xbar_main_rot (
   tl_d2h_t tl_s1n_32_us_d2h ;
 
 
-  tl_h2d_t tl_s1n_32_ds_h2d [9];
-  tl_d2h_t tl_s1n_32_ds_d2h [9];
+  tl_h2d_t tl_s1n_32_ds_h2d [11];
+  tl_d2h_t tl_s1n_32_ds_d2h [11];
 
   // Create steering signal
   logic [3:0] dev_sel_s1n_32;
@@ -142,6 +150,19 @@ module xbar_main_rot (
   tl_h2d_t tl_sm1_52_ds_h2d ;
   tl_d2h_t tl_sm1_52_ds_d2h ;
 
+  tl_h2d_t tl_sm1_60_us_h2d [2];
+  tl_d2h_t tl_sm1_60_us_d2h [2];
+
+  tl_h2d_t tl_sm1_60_ds_h2d ;
+  tl_d2h_t tl_sm1_60_ds_d2h ;
+
+
+  tl_h2d_t tl_sm1_61_us_h2d [2];
+  tl_d2h_t tl_sm1_61_us_d2h [2];
+
+  tl_h2d_t tl_sm1_61_ds_h2d ;
+  tl_d2h_t tl_sm1_61_ds_d2h ;
+
 
 
   // Create steering signal
@@ -172,6 +193,12 @@ module xbar_main_rot (
 
   assign tl_sm1_52_us_h2d[0] = tl_s1n_32_ds_h2d[8];
   assign tl_s1n_32_ds_d2h[8] = tl_sm1_52_us_d2h[0];
+
+  assign tl_sm1_60_us_h2d[0] = tl_s1n_32_ds_h2d[9];
+  assign tl_s1n_32_ds_d2h[9] = tl_sm1_60_us_d2h[0];
+
+  assign tl_sm1_61_us_h2d[0] = tl_s1n_32_ds_h2d[10];
+  assign tl_s1n_32_ds_d2h[10] = tl_sm1_61_us_d2h[0];
 
 
   assign tl_s1n_32_us_h2d = tl_host_i;
@@ -205,11 +232,17 @@ module xbar_main_rot (
   assign tl_otbn_o = tl_sm1_52_ds_h2d;
   assign tl_sm1_52_ds_d2h = tl_otbn_i;
 
+  assign tl_sm3_o = tl_sm1_60_ds_h2d;
+  assign tl_sm1_60_ds_d2h = tl_sm3_i;
+
+  assign tl_sm4_o = tl_sm1_61_ds_h2d;
+  assign tl_sm1_61_ds_d2h = tl_sm4_i;
+
   
 
   always_comb begin
     // default steering to generate error response if address is not within the range
-    dev_sel_s1n_32 = 4'd9;
+    dev_sel_s1n_32 = 4'd11;
     tl_s1n_32_us_h2d_mask = tl_s1n_32_us_h2d;
     if ((tl_s1n_32_us_h2d.a_address &
          ~(ADDR_MASK_ROM_CTRL__ROM_ROT)) == ADDR_SPACE_ROM_CTRL__ROM_ROT) begin
@@ -256,6 +289,15 @@ module xbar_main_rot (
       dev_sel_s1n_32 = 4'd8;
       tl_s1n_32_us_h2d_mask.a_address = tl_s1n_32_us_h2d.a_address & ADDR_MASK_OTBN_ROT;
 
+    end else if ((tl_s1n_32_us_h2d.a_address &
+                  ~(ADDR_MASK_SM3)) == ADDR_SPACE_SM3) begin
+      dev_sel_s1n_32 = 5'd9;
+      tl_s1n_32_us_h2d_mask.a_address = tl_s1n_32_us_h2d.a_address & ADDR_MASK_SM3;
+
+    end else if ((tl_s1n_32_us_h2d.a_address &
+                  ~(ADDR_MASK_SM4)) == ADDR_SPACE_SM4) begin
+      dev_sel_s1n_32 = 5'd10;
+      tl_s1n_32_us_h2d_mask.a_address = tl_s1n_32_us_h2d.a_address & ADDR_MASK_SM4;
     end
   end
 
@@ -393,13 +435,41 @@ module xbar_main_rot (
     .tl_d_o       (tl_sm1_52_ds_h2d),
     .tl_d_i       (tl_sm1_52_ds_d2h)
   );
+  tlul_socket_m1 #(
+    .HReqDepth (8'h0),
+    .HRspDepth (8'h0),
+    .DReqPass  (1'b0),
+    .DRspPass  (1'b0),
+    .M         (2)
+  ) u_sm1_60 (
+    .clk_i        (clk_i),
+    .rst_ni       (rst_ni),
+    .tl_h_i       (tl_sm1_60_us_h2d),
+    .tl_h_o       (tl_sm1_60_us_d2h),
+    .tl_d_o       (tl_sm1_60_ds_h2d),
+    .tl_d_i       (tl_sm1_60_ds_d2h)
+  );
+  tlul_socket_m1 #(
+    .HReqDepth (8'h0),
+    .HRspDepth (8'h0),
+    .DReqPass  (1'b0),
+    .DRspPass  (1'b0),
+    .M         (2)
+  ) u_sm1_61 (
+    .clk_i        (clk_i),
+    .rst_ni       (rst_ni),
+    .tl_h_i       (tl_sm1_61_us_h2d),
+    .tl_h_o       (tl_sm1_61_us_d2h),
+    .tl_d_o       (tl_sm1_61_ds_h2d),
+    .tl_d_i       (tl_sm1_61_ds_d2h)
+  );
 
   tlul_socket_1n #(
     .HReqDepth (4'h0),
     .HRspDepth (4'h0),
-    .DReqDepth (32'h0),
-    .DRspDepth (32'h0),
-    .N         (9)
+    .DReqDepth (44'h0),
+    .DRspDepth (44'h0),
+    .N         (11)
   ) u_s1n_32 (
     .clk_i        (clk_i),
     .rst_ni       (rst_ni),

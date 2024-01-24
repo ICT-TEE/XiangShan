@@ -142,6 +142,10 @@ module rot_top #(
   tlul_pkg::tl_d2h_t       rom_ctrl_regs_tl_rsp;
   tlul_pkg::tl_h2d_t       otbn_tl_req;
   tlul_pkg::tl_d2h_t       otbn_tl_rsp;
+  tlul_pkg::tl_h2d_t       sm3_tl_req;
+  tlul_pkg::tl_d2h_t       sm3_tl_rsp;
+  tlul_pkg::tl_h2d_t       sm4_tl_req;
+  tlul_pkg::tl_d2h_t       sm4_tl_rsp;
 
 
   // Alert list
@@ -579,6 +583,27 @@ module rot_top #(
       .rst_otp_ni (rst_ni)
   );
 
+  sm3 u_sm3 (
+
+      // Inter-module signals
+      .tl_i(sm3_tl_req),
+      .tl_o(sm3_tl_rsp),
+
+      // Clock and reset connections
+      .clk_i (clk_i),
+      .rst_ni (rst_ni)
+  );
+  sm4 u_sm4 (
+
+      // Inter-module signals
+      .tl_i(sm4_tl_req),
+      .tl_o(sm4_tl_rsp),
+
+      // Clock and reset connections
+      .clk_i (clk_i),
+      .rst_ni (rst_ni)
+  );
+
   xbar_main_rot u_xbar_main (
     .clk_i,
     .rst_ni,
@@ -621,7 +646,15 @@ module rot_top #(
     
     // port: tl_otbn
     .tl_otbn_o(otbn_tl_req),
-    .tl_otbn_i(otbn_tl_rsp)
+    .tl_otbn_i(otbn_tl_rsp),
+
+    // port: tl_sm3
+    .tl_sm3_o(sm3_tl_req),
+    .tl_sm3_i(sm3_tl_rsp),
+
+    // port: tl_sm4
+    .tl_sm4_o(sm4_tl_req),
+    .tl_sm4_i(sm4_tl_rsp)
 
   );
     
