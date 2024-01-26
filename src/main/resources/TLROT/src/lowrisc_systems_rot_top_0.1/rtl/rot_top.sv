@@ -246,10 +246,10 @@ module rot_top #(
   // logic       es_rng_fips_o;
 
   // otbn
-  prim_ram_1p_pkg::ram_1p_cfg_t       ast_ram_1p_cfg = prim_ram_1p_pkg::RAM_1P_CFG_DEFAULT;
+  localparam prim_ram_1p_pkg::ram_1p_cfg_t       ast_ram_1p_cfg = prim_ram_1p_pkg::RAM_1P_CFG_DEFAULT;
   otp_ctrl_pkg::otbn_otp_key_req_t       otp_ctrl_otbn_otp_key_req;
   otp_ctrl_pkg::otbn_otp_key_rsp_t       otp_ctrl_otbn_otp_key_rsp;
-  localparam lc_ctrl_pkg::lc_tx_t       flash_ctrl_rma_ack = lc_ctrl_pkg::Off;
+  localparam lc_ctrl_pkg::lc_tx_t       flash_ctrl_rma_ack = lc_ctrl_pkg::LC_TX_DEFAULT;
   lc_ctrl_pkg::lc_tx_t       otbn_lc_rma_ack;
 
   // sinterrupt assignments
@@ -285,14 +285,14 @@ module rot_top #(
   assign edn0_edn_req_intr[1] = edn0_edn_req[1];
   assign edn0_edn_req_intr[2] = edn0_edn_req[2];
   assign edn0_edn_req_intr[4] = edn0_edn_req[4];
-  assign edn0_edn_req_intr[5] = edn0_edn_req[5];
+  // assign edn0_edn_req_intr[5] = edn0_edn_req[5];
   // assign edn0_edn_req_intr[6] = edn0_edn_req[6];
   assign edn0_edn_req_intr[7] = edn0_edn_req[7];
 
   assign edn0_edn_rsp[1] = edn0_edn_rsp_intr[1];
   assign edn0_edn_rsp[2] = edn0_edn_rsp_intr[2];
   assign edn0_edn_rsp[4] = edn0_edn_rsp_intr[4];
-  assign edn0_edn_rsp[5] = edn0_edn_rsp_intr[5];
+  // assign edn0_edn_rsp[5] = edn0_edn_rsp_intr[5];
   // assign edn0_edn_rsp[6] = edn0_edn_rsp_intr[6];
   assign edn0_edn_rsp[7] = edn0_edn_rsp_intr[7];
 
@@ -561,8 +561,8 @@ module rot_top #(
       // Inter-module signals
       .otbn_otp_key_o(otp_ctrl_otbn_otp_key_req),
       .otbn_otp_key_i(otp_ctrl_otbn_otp_key_rsp),
-      // .edn_rnd_o(edn1_edn_req[0]),
-      // .edn_rnd_i(edn1_edn_rsp[0]),
+      .edn_rnd_o(edn0_edn_req_intr[5]),
+      .edn_rnd_i(edn0_edn_rsp_intr[5]),
       .edn_urnd_o(edn0_edn_req_intr[6]),
       .edn_urnd_i(edn0_edn_rsp_intr[6]),
       .idle_o(clkmgr_aon_idle[2]),
@@ -581,6 +581,13 @@ module rot_top #(
       .rst_ni (rst_ni),
       .rst_edn_ni (rst_edn_ni),
       .rst_otp_ni (rst_ni)
+  );
+
+  otbn_otp_controller u_otbn_otp_ctrl (
+    .clk(clk_i),
+    .rst_n(rst_ni),
+    .req(otp_ctrl_otbn_otp_key_req),
+    .rsp(otp_ctrl_otbn_otp_key_rsp)
   );
 
   sm3 u_sm3 (

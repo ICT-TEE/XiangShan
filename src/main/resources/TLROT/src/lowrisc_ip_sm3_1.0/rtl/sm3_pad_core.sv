@@ -86,22 +86,22 @@ wire                        inpt_vld_byte_cmplt;
 integer i;
 
 //流程状态机
-`define STT_W 10
-`define STT_W1 `STT_W - 1
+`define STT_W2 10
+`define STT_W21 `STT_W2 - 1
 
-reg [`STT_W1:0]   state;
-reg [`STT_W1:0]   nxt_state;
+reg [`STT_W21:0]   state;
+reg [`STT_W21:0]   nxt_state;
 
-localparam IDLE                     = `STT_W'h1;
-localparam INPT_DATA                = `STT_W'h2;
-localparam INPT_PAD_LST_DATA        = `STT_W'h4;
-localparam PAD_10_DATA              = `STT_W'h8;
-localparam PAD_00_DATA              = `STT_W'h10;
-localparam PAD_LEN_H                = `STT_W'h20;
-localparam PAD_LEN_L                = `STT_W'h40;
-localparam ADD_BLK_PAD_00           = `STT_W'h80;
-localparam PAD_00_WAT_NEW_BLK       = `STT_W'h100;
-localparam PAD_10_WAT_NEW_BLK       = `STT_W'h200;
+localparam IDLE                     = `STT_W2'h1;
+localparam INPT_DATA                = `STT_W2'h2;
+localparam INPT_PAD_LST_DATA        = `STT_W2'h4;
+localparam PAD_10_DATA              = `STT_W2'h8;
+localparam PAD_00_DATA              = `STT_W2'h10;
+localparam PAD_LEN_H                = `STT_W2'h20;
+localparam PAD_LEN_L                = `STT_W2'h40;
+localparam ADD_BLK_PAD_00           = `STT_W2'h80;
+localparam PAD_00_WAT_NEW_BLK       = `STT_W2'h100;
+localparam PAD_10_WAT_NEW_BLK       = `STT_W2'h200;
 
 //对输入数据打拍  beat inpt signals
 always @(posedge clk or negedge rst_n) begin
@@ -290,7 +290,7 @@ end
 
 always @(posedge clk or negedge rst_n) begin
     if(~rst_n)
-        state   <=  `STT_W'b1;
+        state   <=  `STT_W2'b1;
     else begin
         state   <=  nxt_state;
     end  
