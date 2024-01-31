@@ -351,7 +351,9 @@ module otbn_instruction_fetch
   // Strip integrity bits before passing instruction to decoder
   assign insn_fetch_resp_data_o  = insn_fetch_resp_data_intg_q[31:0];
 
-  assign insn_fetch_err_o = |insn_fetch_resp_intg_error_vec & insn_fetch_resp_valid_q;
+  // zdr: otbn ecc disable
+  assign insn_fetch_err_o = (|insn_fetch_resp_intg_error_vec & insn_fetch_resp_valid_q) & 1'b0;
+  // assign insn_fetch_err_o = |insn_fetch_resp_intg_error_vec & insn_fetch_resp_valid_q;
 
   // SEC_CM: PC.CTRL_FLOW.REDUN
   // Signal an `insn_addr_err` if the instruction the execute stage requests is not the one that was

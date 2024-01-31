@@ -599,7 +599,9 @@ module otbn
   // dmem_rerror_vec is 2 bits wide and is used to report ECC errors. Bit 1 is set if there's an
   // uncorrectable error and bit 0 is set if there's a correctable error. However, we're treating
   // all errors as fatal, so OR the two signals together.
-  assign dmem_rerror = |dmem_rerror_vec;
+  //zdr: dmem ecc disable
+  assign dmem_rerror = (|dmem_rerror_vec)  & 1'b0;
+  // assign dmem_rerror = |dmem_rerror_vec;
 
   // DMEM access from main TL-UL bus
   logic dmem_gnt_bus;

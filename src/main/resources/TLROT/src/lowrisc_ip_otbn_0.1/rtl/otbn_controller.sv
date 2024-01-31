@@ -1320,8 +1320,9 @@ module otbn_controller
   logic non_prefetch_insn_running;
   assign non_prefetch_insn_running = (insn_valid_i & ~stall &
                                       (csr_addr != CsrRndPrefetch) & ~key_invalid);
-
-  assign ispr_rdata_intg_err = non_prefetch_insn_running & |(ispr_rdata_used_intg_err);
+  // zdr ecc disable
+  logic ispr_rdata_used_intg_err_zdr = (|ispr_rdata_used_intg_err) & 1'b0;
+  assign ispr_rdata_intg_err = non_prefetch_insn_running & |(ispr_rdata_used_intg_err_zdr);
 
   `ASSERT_KNOWN(IsprRdataIntgErrKnown_A, ispr_rdata_intg_err)
 

@@ -140,7 +140,9 @@ module otbn_mac_bignum
   // current operation does not zero the accumulation register.
   logic acc_used;
   assign acc_used = mac_en_i & ~operation_i.zero_acc;
-  assign operation_intg_violation_err_o = acc_used & |(acc_intg_err);
+  //zdr ecc disable
+  logic acc_intg_err_zdr = (|acc_intg_err) & 1'b0;
+  assign operation_intg_violation_err_o = acc_used & |(acc_intg_err_zdr);
 
   // Accumulator logic
 
