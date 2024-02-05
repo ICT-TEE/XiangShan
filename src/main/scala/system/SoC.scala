@@ -263,7 +263,7 @@ class SoCMisc()(implicit p: Parameters) extends BaseSoC
     val sourceNode = IntSourceNode(IntSourcePortSimple(num+rot_num, ports = 1, sources = 1))
     
     lazy val module = new LazyModuleImp(this){
-      val (rot,regular) = sourceNode.out.head._1.splitAt(rot_num)
+      val (regular,rot) = sourceNode.out.head._1.splitAt(num)
       val in = IO(Input(Vec(num, Bool())))
       in.zip(regular).foreach{ case (i, s) => s := i }
       // in.zip(sourceNode.out.head._1).foreach{ case (i, s) => s := i }
